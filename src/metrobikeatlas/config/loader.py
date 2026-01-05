@@ -6,10 +6,15 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from metrobikeatlas.config.models import (
+    AnalyticsSettings,
     AppConfig,
     AppSettings,
     CacheSettings,
+    ClusteringSettings,
+    FeatureSettings,
     LoggingSettings,
+    POISettings,
+    SimilaritySettings,
     SpatialSettings,
     TDXBikeSettings,
     TDXMetroSettings,
@@ -102,6 +107,52 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
         ttl_seconds=int(cache_raw.get("ttl_seconds", 3600)),
     )
 
+    features_raw: Mapping[str, Any] = raw.get("features", {})
+    poi_raw = features_raw.get("poi")
+    poi = None
+    if isinstance(poi_raw, Mapping):
+        poi = POISettings(
+            path=_as_path(str(poi_raw.get("path", "data/external/poi.csv")), base_dir=base_dir),
+            radii_m=[int(x) for x in poi_raw.get("radii_m", [300, 500])],
+            categories=list(poi_raw.get("categories", [])),
+        )
+
+    district_map_value = features_raw.get("station_district_map_path")
+    district_map_path = (
+        None if not district_map_value else _as_path(str(district_map_value), base_dir=base_dir)
+    )
+
+    features = FeatureSettings(
+        station_features_path=_as_path(
+            str(features_raw.get("station_features_path", "data/gold/station_features.csv")),
+            base_dir=base_dir,
+        ),
+        station_targets_path=_as_path(
+            str(features_raw.get("station_targets_path", "data/gold/station_targets.csv")),
+            base_dir=base_dir,
+        ),
+        timeseries_window_days=int(features_raw.get("timeseries_window_days", 7)),
+        poi=poi,
+        station_district_map_path=district_map_path,
+    )
+
+    analytics_raw: Mapping[str, Any] = raw.get("analytics", {})
+    similarity_raw: Mapping[str, Any] = analytics_raw.get("similarity", {})
+    similarity = SimilaritySettings(
+        top_k=int(similarity_raw.get("top_k", 5)),
+        metric=str(similarity_raw.get("metric", "euclidean")),  # type: ignore[arg-type]
+        standardize=bool(similarity_raw.get("standardize", True)),
+    )
+    if similarity.metric not in ("euclidean", "cosine"):
+        raise ValueError(f"Unsupported similarity.metric: {similarity.metric}")
+
+    clustering_raw: Mapping[str, Any] = analytics_raw.get("clustering", {})
+    clustering = ClusteringSettings(
+        k=int(clustering_raw.get("k", 5)),
+        standardize=bool(clustering_raw.get("standardize", True)),
+    )
+    analytics = AnalyticsSettings(similarity=similarity, clustering=clustering)
+
     logging_raw: Mapping[str, Any] = raw.get("logging", {})
     file_value = logging_raw.get("file")
     log_file = None if not file_value else _as_path(str(file_value), base_dir=base_dir)
@@ -128,6 +179,8 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
         temporal=temporal,
         spatial=spatial,
         cache=cache,
+        features=features,
+        analytics=analytics,
         logging=logging_settings,
         web=web,
     )

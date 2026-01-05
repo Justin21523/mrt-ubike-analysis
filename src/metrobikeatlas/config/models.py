@@ -7,6 +7,7 @@ from typing import Literal, Optional
 
 Granularity = Literal["15min", "hour", "day"]
 SpatialJoinMethod = Literal["buffer", "nearest"]
+SimilarityMetric = Literal["euclidean", "cosine"]
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,41 @@ class CacheSettings:
 
 
 @dataclass(frozen=True)
+class POISettings:
+    path: Path
+    radii_m: list[int]
+    categories: list[str]
+
+
+@dataclass(frozen=True)
+class FeatureSettings:
+    station_features_path: Path
+    station_targets_path: Path
+    timeseries_window_days: int
+    poi: Optional[POISettings]
+    station_district_map_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class SimilaritySettings:
+    top_k: int
+    metric: SimilarityMetric
+    standardize: bool
+
+
+@dataclass(frozen=True)
+class ClusteringSettings:
+    k: int
+    standardize: bool
+
+
+@dataclass(frozen=True)
+class AnalyticsSettings:
+    similarity: SimilaritySettings
+    clustering: ClusteringSettings
+
+
+@dataclass(frozen=True)
 class LoggingSettings:
     level: str
     format: str
@@ -83,6 +119,7 @@ class AppConfig:
     temporal: TemporalSettings
     spatial: SpatialSettings
     cache: CacheSettings
+    features: FeatureSettings
+    analytics: AnalyticsSettings
     logging: LoggingSettings
     web: WebSettings
-

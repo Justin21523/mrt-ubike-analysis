@@ -5,10 +5,15 @@ from pathlib import Path
 import pandas as pd
 
 from metrobikeatlas.config.models import (
+    AnalyticsSettings,
     AppConfig,
     AppSettings,
     CacheSettings,
+    ClusteringSettings,
+    FeatureSettings,
     LoggingSettings,
+    POISettings,
+    SimilaritySettings,
     SpatialSettings,
     TDXBikeSettings,
     TDXMetroSettings,
@@ -36,6 +41,21 @@ def _test_config() -> AppConfig:
         temporal=TemporalSettings(timezone="UTC", granularity="hour"),
         spatial=SpatialSettings(join_method="buffer", radius_m=500, nearest_k=3),
         cache=CacheSettings(dir=Path("data/cache"), ttl_seconds=0),
+        features=FeatureSettings(
+            station_features_path=Path("data/gold/station_features.csv"),
+            station_targets_path=Path("data/gold/station_targets.csv"),
+            timeseries_window_days=7,
+            poi=POISettings(
+                path=Path("data/external/poi.csv"),
+                radii_m=[300, 500],
+                categories=["food"],
+            ),
+            station_district_map_path=Path("data/external/metro_station_district.csv"),
+        ),
+        analytics=AnalyticsSettings(
+            similarity=SimilaritySettings(top_k=5, metric="euclidean", standardize=True),
+            clustering=ClusteringSettings(k=3, standardize=True),
+        ),
         logging=LoggingSettings(level="INFO", format="%(message)s"),
         web=WebSettings(static_dir=Path("web"), map=WebMapSettings(center_lat=0, center_lon=0, zoom=1)),
     )
@@ -113,4 +133,3 @@ def test_station_timeseries_prefers_metro_series_when_available(tmp_path: Path) 
     assert metro["is_proxy"] is False
     assert metro["metric"] == "metro_ridership"
     assert metro["points"][0]["value"] == 1234.0
-

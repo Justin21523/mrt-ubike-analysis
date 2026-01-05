@@ -30,6 +30,28 @@
     "dir": "data/cache",
     "ttl_seconds": 3600
   },
+  "features": {
+    "station_features_path": "data/gold/station_features.csv",
+    "station_targets_path": "data/gold/station_targets.csv",
+    "timeseries_window_days": 7,
+    "poi": {
+      "path": "data/external/poi.csv",
+      "radii_m": [300, 500],
+      "categories": ["food", "transit", "education", "office", "park", "tourism"]
+    },
+    "station_district_map_path": "data/external/metro_station_district.csv"
+  },
+  "analytics": {
+    "similarity": {
+      "top_k": 5,
+      "metric": "euclidean",
+      "standardize": true
+    },
+    "clustering": {
+      "k": 5,
+      "standardize": true
+    }
+  },
   "logging": {
     "level": "INFO",
     "format": "%(asctime)s %(levelname)s %(name)s - %(message)s"
@@ -43,4 +65,3 @@
     }
   }
 }
-
