@@ -6,6 +6,48 @@ from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 
+class TemporalConfigOut(BaseModel):
+    timezone: str
+    granularity: str
+
+
+class SpatialConfigOut(BaseModel):
+    join_method: str
+    radius_m: float
+    nearest_k: int
+
+
+class SimilarityConfigOut(BaseModel):
+    top_k: int
+    metric: str
+    standardize: bool
+
+
+class ClusteringConfigOut(BaseModel):
+    k: int
+    standardize: bool
+
+
+class AnalyticsConfigOut(BaseModel):
+    similarity: SimilarityConfigOut
+    clustering: ClusteringConfigOut
+
+
+class WebMapConfigOut(BaseModel):
+    center_lat: float
+    center_lon: float
+    zoom: int
+
+
+class AppConfigOut(BaseModel):
+    app_name: str
+    demo_mode: bool
+    temporal: TemporalConfigOut
+    spatial: SpatialConfigOut
+    analytics: AnalyticsConfigOut
+    web_map: WebMapConfigOut
+
+
 class StationOut(BaseModel):
     id: str
     name: str
@@ -85,4 +127,14 @@ class NearbyBikeOut(BaseModel):
     lat: float
     lon: float
     distance_m: float
+    capacity: Optional[int] = None
+
+
+class BikeStationOut(BaseModel):
+    id: str
+    name: str
+    lat: float
+    lon: float
+    city: Optional[str] = None
+    operator: Optional[str] = None
     capacity: Optional[int] = None

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from metrobikeatlas.api.schemas import (
     AnalyticsOverviewOut,
+    AppConfigOut,
+    BikeStationOut,
     NearbyBikeOut,
     SimilarStationOut,
     StationFactorsOut,
@@ -18,6 +22,57 @@ router = APIRouter()
 
 def get_service(request: Request) -> StationService:
     return request.app.state.station_service  # type: ignore[attr-defined]
+
+
+@router.get("/config", response_model=AppConfigOut)
+def get_config(service: StationService = Depends(get_service)) -> AppConfigOut:
+    cfg = service.config
+    return AppConfigOut(
+        app_name=cfg.app.name,
+        demo_mode=cfg.app.demo_mode,
+        temporal={
+            "timezone": cfg.temporal.timezone,
+            "granularity": cfg.temporal.granularity,
+        },
+        spatial={
+            "join_method": cfg.spatial.join_method,
+            "radius_m": cfg.spatial.radius_m,
+            "nearest_k": cfg.spatial.nearest_k,
+        },
+        analytics={
+            "similarity": {
+                "top_k": cfg.analytics.similarity.top_k,
+                "metric": cfg.analytics.similarity.metric,
+                "standardize": cfg.analytics.similarity.standardize,
+            },
+            "clustering": {
+                "k": cfg.analytics.clustering.k,
+                "standardize": cfg.analytics.clustering.standardize,
+            },
+        },
+        web_map={
+            "center_lat": cfg.web.map.center_lat,
+            "center_lon": cfg.web.map.center_lon,
+            "zoom": cfg.web.map.zoom,
+        },
+    )
+
+
+@router.get("/bike_stations", response_model=list[BikeStationOut])
+def list_bike_stations(service: StationService = Depends(get_service)) -> list[BikeStationOut]:
+    bikes = service.list_bike_stations()
+    return [
+        BikeStationOut(
+            id=s["station_id"],
+            name=s["name"],
+            lat=s["lat"],
+            lon=s["lon"],
+            city=s.get("city"),
+            operator=s.get("operator"),
+            capacity=s.get("capacity"),
+        )
+        for s in bikes
+    ]
 
 
 @router.get("/stations", response_model=list[StationOut])

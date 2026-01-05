@@ -65,6 +65,14 @@ class LocalRepository:
 
         return df.to_dict(orient="records")
 
+    def list_bike_stations(self) -> list[dict[str, Any]]:
+        cols = ["station_id", "name", "lat", "lon", "city", "operator", "capacity"]
+        present = [c for c in cols if c in self._bike_stations.columns]
+        df = self._bike_stations[present].copy()
+        if "station_id" in df.columns:
+            df["station_id"] = df["station_id"].astype(str)
+        return df.to_dict(orient="records")
+
     def nearby_bike(self, metro_station_id: str) -> list[dict[str, Any]]:
         links = self._links[self._links["metro_station_id"] == metro_station_id].copy()
         if links.empty:

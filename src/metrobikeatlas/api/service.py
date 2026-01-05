@@ -12,8 +12,15 @@ class StationService:
         self._config = config
         self._repo = DemoRepository(config) if config.app.demo_mode else LocalRepository(config)
 
+    @property
+    def config(self) -> AppConfig:
+        return self._config
+
     def list_stations(self) -> list[dict[str, Any]]:
         return self._repo.list_metro_stations()
+
+    def list_bike_stations(self) -> list[dict[str, Any]]:
+        return self._repo.list_bike_stations()
 
     def station_timeseries(self, station_id: str) -> dict[str, Any]:
         return self._repo.station_timeseries(station_id)
