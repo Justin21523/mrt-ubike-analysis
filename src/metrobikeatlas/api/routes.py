@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from metrobikeatlas.api.schemas import NearbyBikeOut, StationOut, StationTimeSeriesOut
+from metrobikeatlas.api.schemas import (
+    NearbyBikeOut,
+    SimilarStationOut,
+    StationFactorsOut,
+    StationOut,
+    StationTimeSeriesOut,
+)
 from metrobikeatlas.api.service import StationService
 
 
@@ -60,3 +66,32 @@ def nearby_bike(
         for s in payload
     ]
 
+
+@router.get("/station/{station_id}/factors", response_model=StationFactorsOut)
+def station_factors(
+    station_id: str, service: StationService = Depends(get_service)
+) -> StationFactorsOut:
+    try:
+        payload = service.station_factors(station_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return StationFactorsOut.model_validate(payload)
+
+
+@router.get("/station/{station_id}/similar", response_model=list[SimilarStationOut])
+def similar_stations(
+    station_id: str, service: StationService = Depends(get_service)
+) -> list[SimilarStationOut]:
+    try:
+        payload = service.similar_stations(station_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return [
+        SimilarStationOut(
+            id=s["station_id"],
+            name=s.get("name"),
+            distance=s["distance"],
+            cluster=s.get("cluster"),
+        )
+        for s in payload
+    ]

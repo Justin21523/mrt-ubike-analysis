@@ -7,7 +7,10 @@ import math
 import random
 from typing import Any
 
+import pandas as pd
+
 from metrobikeatlas.config.models import AppConfig
+from metrobikeatlas.analytics.similarity import find_similar_stations
 from metrobikeatlas.schemas.core import BikeStation, MetroStation, StationBikeLink, TimeSeriesPoint
 from metrobikeatlas.utils.geo import haversine_m
 
@@ -58,6 +61,7 @@ class DemoRepository:
 
         self._links = self._build_links()
         self._series = self._build_timeseries()
+        self._station_features = self._build_station_features()
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
         return [asdict(s) for s in self._metro]
@@ -94,6 +98,46 @@ class DemoRepository:
                 },
             ],
         }
+
+    def station_factors(self, metro_station_id: str) -> dict[str, Any]:
+        df = self._station_features.copy()
+        df["station_id"] = df["station_id"].astype(str)
+        if metro_station_id not in set(df["station_id"]):
+            raise KeyError(metro_station_id)
+
+        row = df[df["station_id"] == metro_station_id].iloc[0].to_dict()
+        numeric_cols = [
+            c
+            for c in df.columns
+            if c != "station_id" and pd.api.types.is_numeric_dtype(df[c])
+        ]
+
+        factors = []
+        for k, v in row.items():
+            if k == "station_id":
+                continue
+            percentile = None
+            if k in numeric_cols:
+                pct_series = df[k].rank(pct=True, method="average")
+                percentile = float(pct_series[df["station_id"] == metro_station_id].iloc[0])
+            factors.append({"name": k, "value": v, "percentile": percentile})
+        factors = sorted(factors, key=lambda x: x["name"])
+        return {"station_id": metro_station_id, "factors": factors, "available": True}
+
+    def similar_stations(self, metro_station_id: str) -> list[dict[str, Any]]:
+        sim = find_similar_stations(
+            self._station_features,
+            station_id=metro_station_id,
+            top_k=self._config.analytics.similarity.top_k,
+            metric=self._config.analytics.similarity.metric,
+            standardize=self._config.analytics.similarity.standardize,
+        )
+        name_map = {m.station_id: m.name for m in self._metro}
+        out = []
+        for _, r in sim.iterrows():
+            sid = str(r["station_id"])
+            out.append({"station_id": sid, "name": name_map.get(sid), "distance": float(r["distance"])})
+        return out
 
     def _build_links(self) -> list[StationBikeLink]:
         links: list[StationBikeLink] = []
@@ -142,3 +186,28 @@ class DemoRepository:
             output[metro.station_id] = {"metro": metro_points, "bike_available": bike_points}
         return output
 
+    def _build_station_features(self) -> pd.DataFrame:
+        suffix = f"r{int(self._config.spatial.radius_m)}m"
+        if self._config.spatial.join_method != "buffer":
+            suffix = f"k{int(self._config.spatial.nearest_k)}"
+
+        bike_by_id = {b.station_id: b for b in self._bike}
+        rows = []
+        for metro in self._metro:
+            linked = [l for l in self._links if l.metro_station_id == metro.station_id]
+            capacities = [bike_by_id[l.bike_station_id].capacity or 0 for l in linked]
+            distances = [l.distance_m for l in linked]
+
+            rng = random.Random(metro.station_id)
+            rows.append(
+                {
+                    "station_id": metro.station_id,
+                    "district": rng.choice(["Datong", "Daan", "Xinyi"]),
+                    f"bike_station_count_{suffix}": len({l.bike_station_id for l in linked}),
+                    f"bike_capacity_sum_{suffix}": float(sum(capacities)),
+                    f"bike_distance_mean_m_{suffix}": float(sum(distances) / max(len(distances), 1)),
+                    "poi_count_300m": int(rng.uniform(20, 80)),
+                    "poi_count_500m": int(rng.uniform(60, 200)),
+                }
+            )
+        return pd.DataFrame(rows)

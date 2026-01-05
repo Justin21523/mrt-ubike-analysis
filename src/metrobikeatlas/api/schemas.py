@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,25 @@ class StationTimeSeriesOut(BaseModel):
     granularity: str
     timezone: str
     series: list[MetricSeriesOut]
+
+
+class FactorOut(BaseModel):
+    name: str
+    value: Union[float, int, str, None]
+    percentile: Optional[float] = None
+
+
+class StationFactorsOut(BaseModel):
+    station_id: str
+    available: bool = True
+    factors: list[FactorOut]
+
+
+class SimilarStationOut(BaseModel):
+    id: str
+    name: Optional[str] = None
+    distance: float
+    cluster: Optional[int] = None
 
 
 class NearbyBikeOut(BaseModel):

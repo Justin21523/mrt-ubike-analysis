@@ -20,3 +20,9 @@ class StationService:
 
     def nearby_bike(self, station_id: str) -> list[dict[str, Any]]:
         return self._repo.nearby_bike(station_id)
+
+    def station_factors(self, station_id: str) -> dict[str, Any]:
+        return self._repo.station_factors(station_id)
+
+    def similar_stations(self, station_id: str) -> list[dict[str, Any]]:
+        return self._repo.similar_stations(station_id)

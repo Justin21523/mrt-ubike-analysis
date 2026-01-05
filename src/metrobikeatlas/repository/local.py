@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from metrobikeatlas.analytics.similarity import find_similar_stations
 from metrobikeatlas.config.models import AppConfig
 from metrobikeatlas.preprocessing.temporal_align import align_timeseries, compute_rent_return_proxy
 
@@ -30,6 +31,11 @@ class LocalRepository:
         self._links = self._read_required_csv("metro_bike_links.csv")
         self._bike_ts = self._read_required_csv("bike_timeseries.csv", parse_dates=["ts"])
         self._metro_ts = self._read_optional_csv("metro_timeseries.csv", parse_dates=["ts"])
+
+        self._station_features = self._read_optional_path(config.features.station_features_path)
+        self._station_clusters = self._read_optional_path(
+            config.features.station_features_path.parent / "station_clusters.csv"
+        )
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
         cols = ["station_id", "name", "lat", "lon", "city", "system"]
@@ -149,6 +155,79 @@ class LocalRepository:
             ],
         }
 
+    def station_factors(self, metro_station_id: str) -> dict[str, Any]:
+        if self._station_features is None or self._station_features.empty:
+            return {"station_id": metro_station_id, "factors": [], "available": False}
+
+        df = self._station_features.copy()
+        df["station_id"] = df["station_id"].astype(str)
+        if metro_station_id not in set(df["station_id"]):
+            raise KeyError(metro_station_id)
+
+        row = df[df["station_id"] == metro_station_id].iloc[0].to_dict()
+        numeric_cols = [
+            c
+            for c in df.columns
+            if c != "station_id" and pd.api.types.is_numeric_dtype(df[c])
+        ]
+
+        factors = []
+        for k, v in row.items():
+            if k == "station_id":
+                continue
+            if pd.isna(v):
+                value = None
+            else:
+                value = v
+
+            percentile = None
+            if k in numeric_cols and value is not None:
+                pct_series = df[k].rank(pct=True, method="average")
+                percentile = float(pct_series[df["station_id"] == metro_station_id].iloc[0])
+
+            factors.append({"name": k, "value": value, "percentile": percentile})
+
+        factors = sorted(factors, key=lambda x: x["name"])
+        return {"station_id": metro_station_id, "factors": factors, "available": True}
+
+    def similar_stations(self, metro_station_id: str) -> list[dict[str, Any]]:
+        if self._station_features is None or self._station_features.empty:
+            return []
+
+        sim = find_similar_stations(
+            self._station_features,
+            station_id=metro_station_id,
+            top_k=self._config.analytics.similarity.top_k,
+            metric=self._config.analytics.similarity.metric,
+            standardize=self._config.analytics.similarity.standardize,
+        )
+        merged = sim.merge(
+            self._metro_stations[["station_id", "name"]],
+            on="station_id",
+            how="left",
+        )
+
+        cluster_map = None
+        if self._station_clusters is not None and not self._station_clusters.empty:
+            cluster_df = self._station_clusters.copy()
+            if {"station_id", "cluster"} <= set(cluster_df.columns):
+                cluster_map = dict(
+                    zip(cluster_df["station_id"].astype(str), cluster_df["cluster"].astype(int))
+                )
+
+        out = []
+        for _, r in merged.iterrows():
+            station_id = str(r["station_id"])
+            item = {
+                "station_id": station_id,
+                "name": None if pd.isna(r.get("name")) else str(r.get("name")),
+                "distance": float(r["distance"]),
+            }
+            if cluster_map is not None and station_id in cluster_map:
+                item["cluster"] = int(cluster_map[station_id])
+            out.append(item)
+        return out
+
     def _read_required_csv(self, filename: str, **kwargs) -> pd.DataFrame:
         path = self._silver_dir / filename
         if not path.exists():
@@ -160,3 +239,9 @@ class LocalRepository:
         if not path.exists():
             return None
         return pd.read_csv(path, **kwargs)
+
+    @staticmethod
+    def _read_optional_path(path: Path) -> pd.DataFrame | None:
+        if not path.exists():
+            return None
+        return pd.read_csv(path)
