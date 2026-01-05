@@ -21,8 +21,10 @@ class TimeSeriesPointOut(BaseModel):
 
 
 class MetricSeriesOut(BaseModel):
-    metric: str = Field(..., examples=["metro_ridership_proxy", "bike_available_bikes"])
+    metric: str = Field(..., examples=["metro_ridership", "metro_flow_proxy_from_bike_rent"])
     points: list[TimeSeriesPointOut]
+    source: Optional[str] = Field(default=None, examples=["metro_ridership", "bike_proxy"])
+    is_proxy: bool = False
 
 
 class StationTimeSeriesOut(BaseModel):
@@ -39,4 +41,3 @@ class NearbyBikeOut(BaseModel):
     lon: float
     distance_m: float
     capacity: Optional[int] = None
-
