@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from metrobikeatlas.config.loader import load_config
+from metrobikeatlas.quality.silver import validate_silver_dir
 from metrobikeatlas.utils.logging import configure_logging
 
 
@@ -122,6 +123,8 @@ def main() -> None:
         env=env,
     )
 
+    validate_silver_dir(Path(silver_dir), strict=True)
+
     metro_ts_path = Path(silver_dir) / "metro_timeseries.csv"
     if args.import_metro_csv:
         import_cmd = [
@@ -180,4 +183,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
