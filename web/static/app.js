@@ -60,6 +60,43 @@ function setNearbyList(items) {
   }
 }
 
+function setFactors(factorsPayload) {
+  const hint = document.getElementById("factorsHint");
+  const body = document.getElementById("factorsTableBody");
+  body.innerHTML = "";
+
+  if (!factorsPayload?.available) {
+    hint.textContent =
+      "No factors available. In real data mode, run: python scripts/build_features.py";
+    return;
+  }
+
+  hint.textContent = "";
+  for (const f of factorsPayload.factors ?? []) {
+    const tr = document.createElement("tr");
+    const pct = f.percentile == null ? "" : `${Math.round(f.percentile * 100)}%`;
+
+    tr.innerHTML = `
+      <td class="mono">${f.name}</td>
+      <td class="mono">${f.value ?? ""}</td>
+      <td>${pct}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+function setSimilarStations(items) {
+  const list = document.getElementById("similarList");
+  list.innerHTML = "";
+  for (const s of items ?? []) {
+    const li = document.createElement("li");
+    const name = s.name ?? s.id;
+    const cluster = s.cluster == null ? "" : ` · cluster ${s.cluster}`;
+    li.textContent = `${name} · d=${s.distance.toFixed(3)}${cluster}`;
+    list.appendChild(li);
+  }
+}
+
 async function main() {
   const stations = await fetchJson("/stations");
 
@@ -101,6 +138,12 @@ async function main() {
 
       const nearby = await fetchJson(`/station/${encodeURIComponent(s.id)}/nearby_bike`);
       setNearbyList(nearby);
+
+      const factors = await fetchJson(`/station/${encodeURIComponent(s.id)}/factors`);
+      setFactors(factors);
+
+      const similar = await fetchJson(`/station/${encodeURIComponent(s.id)}/similar`);
+      setSimilarStations(similar);
     });
 
     marker.addTo(map);

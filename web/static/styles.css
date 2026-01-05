@@ -17,6 +17,17 @@ body {
   color: var(--text);
 }
 
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
 .header {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
@@ -126,9 +137,57 @@ canvas {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.factors {
+  padding: 0 14px 14px 14px;
+}
+
+.factors-title {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.factors-table-wrap {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.factors-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.factors-table th,
+.factors-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.factors-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(18, 26, 43, 0.95);
+  backdrop-filter: blur(6px);
+  font-weight: 600;
+}
+
+.similar {
+  padding: 0 14px 14px 14px;
+}
+
+.similar-title {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
 @media (min-width: 900px) {
   .charts {
     grid-template-columns: 1fr 1fr;
   }
 }
-
