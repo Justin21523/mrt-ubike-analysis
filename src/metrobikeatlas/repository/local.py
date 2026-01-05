@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from metrobikeatlas.config.models import AppConfig
-from metrobikeatlas.preprocessing.temporal_align import align_timeseries
+from metrobikeatlas.preprocessing.temporal_align import align_timeseries, compute_rent_return_proxy
 
 
 class LocalRepository:
@@ -19,7 +18,7 @@ class LocalRepository:
     - bike_stations.csv
     - metro_bike_links.csv
     - bike_timeseries.csv
-    - metro_timeseries.csv (optional)
+    - metro_timeseries.csv (optional; if missing, API falls back to a bike-derived proxy)
     """
 
     def __init__(self, config: AppConfig, *, silver_dir: Path = Path("data/silver")) -> None:
@@ -61,16 +60,6 @@ class LocalRepository:
         return out
 
     def station_timeseries(self, metro_station_id: str) -> dict[str, Any]:
-        # Metro series (optional)
-        metro_points: list[dict[str, Any]] = []
-        if self._metro_ts is not None and not self._metro_ts.empty:
-            metro_df = self._metro_ts[self._metro_ts["station_id"] == metro_station_id].copy()
-            if not metro_df.empty:
-                metro_points = [
-                    {"ts": row["ts"], "value": float(row["value"])}
-                    for _, row in metro_df.sort_values("ts").iterrows()
-                ]
-
         # Bike series (aggregate nearby bike stations)
         links = self._links[self._links["metro_station_id"] == metro_station_id].copy()
         if links.empty:
@@ -78,31 +67,85 @@ class LocalRepository:
         bike_ids = set(links["bike_station_id"].astype(str).tolist())
 
         bike_df = self._bike_ts[self._bike_ts["station_id"].astype(str).isin(bike_ids)].copy()
-        if bike_df.empty:
-            bike_points: list[dict[str, Any]] = []
-        else:
-            aligned = align_timeseries(
+        if not bike_df.empty and ("rent_proxy" not in bike_df.columns or "return_proxy" not in bike_df.columns):
+            bike_df = compute_rent_return_proxy(
+                bike_df,
+                station_id_col="station_id",
+                ts_col="ts",
+                available_bikes_col="available_bikes",
+            )
+
+        bike_available_points: list[dict[str, Any]] = []
+        metro_proxy_points: list[dict[str, Any]] = []
+        if not bike_df.empty:
+            # Availability is a state variable: resample per station (mean), then sum across stations.
+            bike_available = align_timeseries(
                 bike_df,
                 ts_col="ts",
-                group_cols=(),
+                group_cols=("station_id",),
                 value_cols=("available_bikes",),
                 granularity=self._config.temporal.granularity,
                 timezone=self._config.temporal.timezone,
-                agg="sum",
+                agg="mean",
             )
-            aligned = aligned.sort_values("ts")
-            bike_points = [
+            bike_available = bike_available.groupby("ts", as_index=False)["available_bikes"].sum()
+            bike_available = bike_available.sort_values("ts")
+            bike_available_points = [
                 {"ts": row["ts"], "value": float(row["available_bikes"])}
-                for _, row in aligned.iterrows()
+                for _, row in bike_available.iterrows()
             ]
+
+            # Rent proxy is an event-like signal: sum within buckets per station, then sum across stations.
+            if "rent_proxy" in bike_df.columns:
+                bike_rent = align_timeseries(
+                    bike_df,
+                    ts_col="ts",
+                    group_cols=("station_id",),
+                    value_cols=("rent_proxy",),
+                    granularity=self._config.temporal.granularity,
+                    timezone=self._config.temporal.timezone,
+                    agg="sum",
+                )
+                bike_rent = bike_rent.groupby("ts", as_index=False)["rent_proxy"].sum()
+                bike_rent = bike_rent.sort_values("ts")
+                metro_proxy_points = [
+                    {"ts": row["ts"], "value": float(row["rent_proxy"])}
+                    for _, row in bike_rent.iterrows()
+                ]
+
+        # Metro series: prefer real ridership if provided, otherwise fall back to the bike-derived proxy.
+        metro_is_proxy = True
+        metro_metric = "metro_flow_proxy_from_bike_rent"
+        metro_source = "bike_proxy"
+        metro_points: list[dict[str, Any]] = metro_proxy_points
+        if self._metro_ts is not None and not self._metro_ts.empty:
+            metro_df = self._metro_ts[self._metro_ts["station_id"] == metro_station_id].copy()
+            if not metro_df.empty:
+                metro_is_proxy = False
+                metro_metric = "metro_ridership"
+                metro_source = "metro_ridership"
+                metro_points = [
+                    {"ts": row["ts"], "value": float(row["value"])}
+                    for _, row in metro_df.sort_values("ts").iterrows()
+                ]
 
         return {
             "station_id": metro_station_id,
             "granularity": self._config.temporal.granularity,
             "timezone": self._config.temporal.timezone,
             "series": [
-                {"metric": "metro_ridership", "points": metro_points},
-                {"metric": "bike_available_bikes", "points": bike_points},
+                {
+                    "metric": metro_metric,
+                    "points": metro_points,
+                    "source": metro_source,
+                    "is_proxy": metro_is_proxy,
+                },
+                {
+                    "metric": "bike_available_bikes_total",
+                    "points": bike_available_points,
+                    "source": "tdx_bike_availability",
+                    "is_proxy": False,
+                },
             ],
         }
 
@@ -117,4 +160,3 @@ class LocalRepository:
         if not path.exists():
             return None
         return pd.read_csv(path, **kwargs)
-
