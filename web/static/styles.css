@@ -34,6 +34,13 @@ body {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .title {
   font-size: 18px;
   font-weight: 700;
@@ -43,6 +50,27 @@ body {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.select {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-width: 260px;
 }
 
 .layout {
@@ -181,6 +209,16 @@ canvas {
 }
 
 .similar-title {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.overview {
+  padding: 0 14px 14px 14px;
+}
+
+.overview-title {
   color: var(--muted);
   font-size: 12px;
   margin: 6px 0;

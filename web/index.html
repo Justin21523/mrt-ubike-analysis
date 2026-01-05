@@ -14,8 +14,16 @@
   </head>
   <body>
     <header class="header">
-      <div class="title">MetroBikeAtlas</div>
-      <div class="subtitle">Click a metro station to view metro & bike time series</div>
+      <div class="header-row">
+        <div>
+          <div class="title">MetroBikeAtlas</div>
+          <div class="subtitle">Click a metro station to view metro & bike time series</div>
+        </div>
+        <div class="controls">
+          <label class="control-label" for="stationSelect">Station</label>
+          <select id="stationSelect" class="select"></select>
+        </div>
+      </div>
     </header>
 
     <main class="layout">
@@ -65,6 +73,12 @@
         <div class="similar">
           <div class="similar-title">Similar metro stations</div>
           <ul id="similarList" class="nearby-list"></ul>
+        </div>
+
+        <div class="overview">
+          <div class="overview-title">Analytics overview</div>
+          <div id="overviewHint" class="hint"></div>
+          <ul id="correlationList" class="nearby-list"></ul>
         </div>
       </section>
     </main>
