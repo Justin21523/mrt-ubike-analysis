@@ -26,3 +26,6 @@ class StationService:
 
     def similar_stations(self, station_id: str) -> list[dict[str, Any]]:
         return self._repo.similar_stations(station_id)
+
+    def analytics_overview(self) -> dict[str, Any]:
+        return self._repo.analytics_overview()

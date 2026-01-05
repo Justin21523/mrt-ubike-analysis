@@ -150,6 +150,10 @@ class DemoRepository:
             out.append({"station_id": sid, "name": name_map.get(sid), "distance": float(r["distance"])})
         return out
 
+    def analytics_overview(self, *, top_n: int = 20) -> dict[str, Any]:
+        # Demo-only placeholder
+        return {"available": False}
+
     def _build_links(self) -> list[StationBikeLink]:
         links: list[StationBikeLink] = []
         for metro in self._metro:

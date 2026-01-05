@@ -55,6 +55,30 @@ class SimilarStationOut(BaseModel):
     cluster: Optional[int] = None
 
 
+class CorrelationOut(BaseModel):
+    feature: str
+    correlation: float
+    n: int
+
+
+class RegressionCoefficientOut(BaseModel):
+    feature: str
+    coefficient: float
+
+
+class RegressionOut(BaseModel):
+    r2: Optional[float] = None
+    n: Optional[int] = None
+    coefficients: list[RegressionCoefficientOut] = []
+
+
+class AnalyticsOverviewOut(BaseModel):
+    available: bool
+    correlations: list[CorrelationOut] = []
+    regression: Optional[RegressionOut] = None
+    clusters: Optional[dict[int, int]] = None
+
+
 class NearbyBikeOut(BaseModel):
     id: str
     name: str

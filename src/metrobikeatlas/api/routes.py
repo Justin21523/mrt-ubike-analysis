@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from metrobikeatlas.api.schemas import (
+    AnalyticsOverviewOut,
     NearbyBikeOut,
     SimilarStationOut,
     StationFactorsOut,
@@ -97,3 +98,9 @@ def similar_stations(
         )
         for s in payload
     ]
+
+
+@router.get("/analytics/overview", response_model=AnalyticsOverviewOut)
+def analytics_overview(service: StationService = Depends(get_service)) -> AnalyticsOverviewOut:
+    payload = service.analytics_overview()
+    return AnalyticsOverviewOut.model_validate(payload)

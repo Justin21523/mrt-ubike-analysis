@@ -36,6 +36,12 @@ class LocalRepository:
         self._station_clusters = self._read_optional_path(
             config.features.station_features_path.parent / "station_clusters.csv"
         )
+        self._feature_correlations = self._read_optional_path(
+            config.features.station_features_path.parent / "feature_correlations.csv"
+        )
+        self._regression_coefficients = self._read_optional_path(
+            config.features.station_features_path.parent / "regression_coefficients.csv"
+        )
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
         cols = ["station_id", "name", "lat", "lon", "city", "system"]
@@ -244,6 +250,52 @@ class LocalRepository:
                 item["cluster"] = int(cluster_map[station_id])
             out.append(item)
         return out
+
+    def analytics_overview(self, *, top_n: int = 20) -> dict[str, Any]:
+        """
+        Return a lightweight overview of precomputed analytics outputs (if present).
+        """
+
+        available = self._feature_correlations is not None and self._regression_coefficients is not None
+        if not available:
+            return {"available": False}
+
+        corr = self._feature_correlations.copy()
+        corr = corr.sort_values("correlation", ascending=False).head(max(int(top_n), 0))
+        correlations = corr.to_dict(orient="records")
+
+        reg = self._regression_coefficients.copy()
+        reg = reg[reg["feature"] != "__intercept__"].copy()
+        coefficients = reg[["feature", "coefficient"]].to_dict(orient="records")
+
+        r2 = None
+        n = None
+        if "r2" in self._regression_coefficients.columns:
+            try:
+                r2 = float(self._regression_coefficients["r2"].dropna().iloc[0])
+            except Exception:
+                r2 = None
+        if "n" in self._regression_coefficients.columns:
+            try:
+                n = int(self._regression_coefficients["n"].dropna().iloc[0])
+            except Exception:
+                n = None
+
+        cluster_counts = None
+        if self._station_clusters is not None and {"cluster"} <= set(self._station_clusters.columns):
+            counts = self._station_clusters["cluster"].value_counts().sort_index()
+            cluster_counts = {int(k): int(v) for k, v in counts.to_dict().items()}
+
+        return {
+            "available": True,
+            "correlations": correlations,
+            "regression": {
+                "r2": r2,
+                "n": n,
+                "coefficients": coefficients,
+            },
+            "clusters": cluster_counts,
+        }
 
     def _read_required_csv(self, filename: str, **kwargs) -> pd.DataFrame:
         path = self._silver_dir / filename
