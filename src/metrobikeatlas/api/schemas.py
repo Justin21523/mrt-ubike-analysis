@@ -13,6 +13,8 @@ class StationOut(BaseModel):
     lon: float
     city: Optional[str] = None
     system: Optional[str] = None
+    district: Optional[str] = None
+    cluster: Optional[int] = None
 
 
 class TimeSeriesPointOut(BaseModel):

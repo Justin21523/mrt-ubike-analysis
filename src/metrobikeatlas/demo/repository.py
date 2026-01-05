@@ -64,7 +64,18 @@ class DemoRepository:
         self._station_features = self._build_station_features()
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
-        return [asdict(s) for s in self._metro]
+        by_id = {}
+        for _, row in self._station_features.iterrows():
+            station_id = str(row["station_id"])
+            by_id[station_id] = row.to_dict()
+        out = []
+        for idx, station in enumerate(self._metro):
+            payload = asdict(station)
+            meta = by_id.get(station.station_id, {})
+            payload["district"] = meta.get("district")
+            payload["cluster"] = idx
+            out.append(payload)
+        return out
 
     def list_bike_stations(self) -> list[dict[str, Any]]:
         return [asdict(s) for s in self._bike]

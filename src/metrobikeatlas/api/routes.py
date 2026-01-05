@@ -30,6 +30,8 @@ def list_stations(service: StationService = Depends(get_service)) -> list[Statio
             lon=s["lon"],
             city=s.get("city"),
             system=s.get("system"),
+            district=s.get("district"),
+            cluster=s.get("cluster"),
         )
         for s in stations
     ]

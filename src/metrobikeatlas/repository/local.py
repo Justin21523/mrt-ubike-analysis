@@ -40,6 +40,23 @@ class LocalRepository:
     def list_metro_stations(self) -> list[dict[str, Any]]:
         cols = ["station_id", "name", "lat", "lon", "city", "system"]
         df = self._metro_stations[cols].copy()
+
+        if self._station_features is not None and "district" in self._station_features.columns:
+            district_df = self._station_features[["station_id", "district"]].copy()
+            district_df["station_id"] = district_df["station_id"].astype(str)
+            df["station_id"] = df["station_id"].astype(str)
+            df = df.merge(district_df, on="station_id", how="left")
+        else:
+            df["district"] = None
+
+        if self._station_clusters is not None and {"station_id", "cluster"} <= set(self._station_clusters.columns):
+            cluster_df = self._station_clusters[["station_id", "cluster"]].copy()
+            cluster_df["station_id"] = cluster_df["station_id"].astype(str)
+            df["station_id"] = df["station_id"].astype(str)
+            df = df.merge(cluster_df, on="station_id", how="left")
+        else:
+            df["cluster"] = None
+
         return df.to_dict(orient="records")
 
     def nearby_bike(self, metro_station_id: str) -> list[dict[str, Any]]:
