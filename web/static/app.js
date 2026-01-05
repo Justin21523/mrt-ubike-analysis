@@ -4,6 +4,12 @@ async function fetchJson(url) {
   return await res.json();
 }
 
+function seriesLabel(series) {
+  if (!series) return "No data";
+  const proxy = series.is_proxy ? " (proxy)" : "";
+  return `${series.metric}${proxy}`;
+}
+
 function toChartData(points) {
   return {
     labels: points.map((p) => new Date(p.ts).toLocaleString()),
@@ -80,8 +86,15 @@ async function main() {
       document.getElementById("stationMeta").textContent = `${s.id} · ${s.city ?? ""}`;
 
       const ts = await fetchJson(`/station/${encodeURIComponent(s.id)}/timeseries`);
-      const metro = ts.series.find((x) => x.metric.startsWith("metro"))?.points ?? [];
-      const bike = ts.series.find((x) => x.metric.startsWith("bike"))?.points ?? [];
+      const metroSeries = ts.series.find((x) => x.metric.startsWith("metro"));
+      const bikeSeries = ts.series.find((x) => x.metric.startsWith("bike"));
+      const metro = metroSeries?.points ?? [];
+      const bike = bikeSeries?.points ?? [];
+
+      document.getElementById("metroChartTitle").textContent = seriesLabel(metroSeries);
+      document.getElementById("bikeChartTitle").textContent = seriesLabel(bikeSeries);
+      metroChart.data.datasets[0].label = seriesLabel(metroSeries);
+      bikeChart.data.datasets[0].label = seriesLabel(bikeSeries);
 
       setChartData(metroChart, metro);
       setChartData(bikeChart, bike);
