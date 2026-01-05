@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import math
 import random
-from typing import Any
+from typing import Any, Literal, Optional
 
 import pandas as pd
 
@@ -13,6 +13,12 @@ from metrobikeatlas.config.models import AppConfig
 from metrobikeatlas.analytics.similarity import find_similar_stations
 from metrobikeatlas.schemas.core import BikeStation, MetroStation, StationBikeLink, TimeSeriesPoint
 from metrobikeatlas.utils.geo import haversine_m
+
+
+SpatialJoinMethod = Literal["buffer", "nearest"]
+Granularity = Literal["15min", "hour", "day"]
+SimilarityMetric = Literal["euclidean", "cosine"]
+MetroSeriesMode = Literal["auto", "ridership", "proxy"]
 
 
 class DemoRepository:
@@ -60,7 +66,6 @@ class DemoRepository:
         ]
 
         self._links = self._build_links()
-        self._series = self._build_timeseries()
         self._station_features = self._build_station_features()
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
@@ -80,34 +85,165 @@ class DemoRepository:
     def list_bike_stations(self) -> list[dict[str, Any]]:
         return [asdict(s) for s in self._bike]
 
-    def nearby_bike(self, metro_station_id: str) -> list[dict[str, Any]]:
-        bike_by_id = {b.station_id: b for b in self._bike}
-        out = []
-        for link in self._links:
-            if link.metro_station_id != metro_station_id:
-                continue
-            bike = bike_by_id[link.bike_station_id]
-            out.append({**asdict(bike), "distance_m": link.distance_m})
-        return sorted(out, key=lambda x: x["distance_m"])
-
-    def station_timeseries(self, metro_station_id: str) -> dict[str, Any]:
-        if metro_station_id not in self._series:
+    def nearby_bike(
+        self,
+        metro_station_id: str,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        metro = next((m for m in self._metro if m.station_id == metro_station_id), None)
+        if metro is None:
             raise KeyError(metro_station_id)
+
+        method: SpatialJoinMethod = join_method or self._config.spatial.join_method
+        radius = self._config.spatial.radius_m if radius_m is None else float(radius_m)
+        k = self._config.spatial.nearest_k if nearest_k is None else int(nearest_k)
+
+        rows = []
+        for bike in self._bike:
+            d = haversine_m(metro.lat, metro.lon, bike.lat, bike.lon)
+            rows.append({**asdict(bike), "distance_m": float(d)})
+
+        if method == "buffer":
+            rows = [r for r in rows if r["distance_m"] <= float(radius)]
+        else:
+            rows = sorted(rows, key=lambda x: x["distance_m"])[: max(int(k), 1)]
+
+        rows = sorted(rows, key=lambda x: x["distance_m"])
+        if limit is not None:
+            rows = rows[: max(int(limit), 0)]
+        return rows
+
+    def station_timeseries(
+        self,
+        metro_station_id: str,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+        granularity: Optional[Granularity] = None,
+        timezone: Optional[str] = None,
+        window_days: Optional[int] = None,
+        metro_series: MetroSeriesMode = "auto",
+    ) -> dict[str, Any]:
+        metro = next((m for m in self._metro if m.station_id == metro_station_id), None)
+        if metro is None:
+            raise KeyError(metro_station_id)
+
+        gran: Granularity = granularity or self._config.temporal.granularity
+        tz = timezone or self._config.temporal.timezone
+        if gran not in ("15min", "hour", "day"):
+            raise ValueError(f"Unsupported granularity: {gran}")
+
+        window_days_value = None if window_days is None else max(int(window_days), 1)
+
+        # Derive a scale from how many bike stations are nearby under the current join settings.
+        nearby = self.nearby_bike(
+            metro_station_id,
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+            limit=None,
+        )
+        scale = max(len(nearby), 1)
+
+        freq_minutes = {"15min": 15, "hour": 60, "day": 1440}[gran]
+        tzinfo = ZoneInfo(tz)
+        end = datetime.now(tzinfo).replace(minute=0, second=0, microsecond=0)
+        if gran == "15min":
+            end = end.replace(minute=(end.minute // 15) * 15)
+        start = end - timedelta(days=window_days_value or 7)
+        steps = int((end - start).total_seconds() // (freq_minutes * 60))
+
+        rng = random.Random(metro_station_id)
+        base_metro = rng.uniform(5000, 15000)
+        amp_metro = rng.uniform(1500, 4000)
+        base_bike = rng.uniform(30, 120) * scale
+        amp_bike = rng.uniform(10, 30) * scale
+
+        metro_points: list[TimeSeriesPoint] = []
+        bike_available: list[TimeSeriesPoint] = []
+        for i in range(steps + 1):
+            ts = start + timedelta(minutes=freq_minutes * i)
+            hour = ts.hour + ts.minute / 60.0
+            daily = math.sin(2 * math.pi * (hour / 24.0))
+            weekend = 0.85 if ts.weekday() >= 5 else 1.0
+
+            metro_value = max(0.0, (base_metro + amp_metro * daily) * weekend)
+            bike_value = max(0.0, base_bike - amp_bike * daily + rng.uniform(-3, 3) * scale)
+
+            metro_points.append(TimeSeriesPoint(ts=ts, value=float(metro_value)))
+            bike_available.append(TimeSeriesPoint(ts=ts, value=float(bike_value)))
+
+        bike_rent: list[TimeSeriesPoint] = []
+        bike_return: list[TimeSeriesPoint] = []
+        prev = None
+        for p in bike_available:
+            if prev is None:
+                prev = p.value
+                bike_rent.append(TimeSeriesPoint(ts=p.ts, value=0.0))
+                bike_return.append(TimeSeriesPoint(ts=p.ts, value=0.0))
+                continue
+            delta = p.value - prev
+            bike_rent.append(TimeSeriesPoint(ts=p.ts, value=float(max(-delta, 0.0))))
+            bike_return.append(TimeSeriesPoint(ts=p.ts, value=float(max(delta, 0.0))))
+            prev = p.value
+
+        metro_ridership_points = [asdict(p) for p in metro_points]
+        metro_proxy_points = [asdict(p) for p in bike_rent]
+
+        series: list[dict[str, Any]] = []
+        if metro_series in ("auto", "ridership"):
+            series.append(
+                {
+                    "metric": "metro_ridership",
+                    "points": metro_ridership_points,
+                    "source": "demo",
+                    "is_proxy": True,
+                }
+            )
+        series.append(
+            {
+                "metric": "metro_flow_proxy_from_bike_rent",
+                "points": metro_proxy_points,
+                "source": "demo",
+                "is_proxy": True,
+            }
+        )
+        if metro_series == "proxy":
+            series = [series[-1]] + series[:-1]
+
+        series.extend(
+            [
+                {
+                    "metric": "bike_available_bikes_total",
+                    "points": [asdict(p) for p in bike_available],
+                    "source": "demo",
+                    "is_proxy": False,
+                },
+                {
+                    "metric": "bike_rent_proxy_total",
+                    "points": [asdict(p) for p in bike_rent],
+                    "source": "demo",
+                    "is_proxy": True,
+                },
+                {
+                    "metric": "bike_return_proxy_total",
+                    "points": [asdict(p) for p in bike_return],
+                    "source": "demo",
+                    "is_proxy": True,
+                },
+            ]
+        )
 
         return {
             "station_id": metro_station_id,
-            "granularity": self._config.temporal.granularity,
-            "timezone": self._config.temporal.timezone,
-            "series": [
-                {
-                    "metric": "metro_ridership_proxy",
-                    "points": [asdict(p) for p in self._series[metro_station_id]["metro"]],
-                },
-                {
-                    "metric": "bike_available_bikes",
-                    "points": [asdict(p) for p in self._series[metro_station_id]["bike_available"]],
-                },
-            ],
+            "granularity": gran,
+            "timezone": tz,
+            "series": series,
         }
 
     def station_factors(self, metro_station_id: str) -> dict[str, Any]:
@@ -135,13 +271,22 @@ class DemoRepository:
         factors = sorted(factors, key=lambda x: x["name"])
         return {"station_id": metro_station_id, "factors": factors, "available": True}
 
-    def similar_stations(self, metro_station_id: str) -> list[dict[str, Any]]:
+    def similar_stations(
+        self,
+        metro_station_id: str,
+        *,
+        top_k: Optional[int] = None,
+        metric: Optional[SimilarityMetric] = None,
+        standardize: Optional[bool] = None,
+    ) -> list[dict[str, Any]]:
         sim = find_similar_stations(
             self._station_features,
             station_id=metro_station_id,
-            top_k=self._config.analytics.similarity.top_k,
-            metric=self._config.analytics.similarity.metric,
-            standardize=self._config.analytics.similarity.standardize,
+            top_k=self._config.analytics.similarity.top_k if top_k is None else int(top_k),
+            metric=self._config.analytics.similarity.metric if metric is None else metric,
+            standardize=self._config.analytics.similarity.standardize
+            if standardize is None
+            else bool(standardize),
         )
         name_map = {m.station_id: m.name for m in self._metro}
         out = []
@@ -168,38 +313,6 @@ class DemoRepository:
                         )
                     )
         return links
-
-    def _build_timeseries(self) -> dict[str, dict[str, list[TimeSeriesPoint]]]:
-        freq_minutes = {"15min": 15, "hour": 60, "day": 1440}[self._config.temporal.granularity]
-        end = datetime.now(self._tz).replace(minute=0, second=0, microsecond=0)
-        start = end - timedelta(days=7)
-        steps = int((end - start).total_seconds() // (freq_minutes * 60))
-
-        output: dict[str, dict[str, list[TimeSeriesPoint]]] = {}
-        for metro in self._metro:
-            rng = random.Random(metro.station_id)
-            metro_points: list[TimeSeriesPoint] = []
-            bike_points: list[TimeSeriesPoint] = []
-
-            base_metro = rng.uniform(5000, 15000)
-            amp_metro = rng.uniform(1500, 4000)
-            base_bike = rng.uniform(30, 120)
-            amp_bike = rng.uniform(10, 30)
-
-            for i in range(steps + 1):
-                ts = start + timedelta(minutes=freq_minutes * i)
-                hour = ts.hour + ts.minute / 60.0
-                daily = math.sin(2 * math.pi * (hour / 24.0))
-                weekend = 0.85 if ts.weekday() >= 5 else 1.0
-
-                metro_value = max(0.0, (base_metro + amp_metro * daily) * weekend)
-                bike_value = max(0.0, base_bike - amp_bike * daily + rng.uniform(-3, 3))
-
-                metro_points.append(TimeSeriesPoint(ts=ts, value=float(metro_value)))
-                bike_points.append(TimeSeriesPoint(ts=ts, value=float(bike_value)))
-
-            output[metro.station_id] = {"metro": metro_points, "bike_available": bike_points}
-        return output
 
     def _build_station_features(self) -> pd.DataFrame:
         suffix = f"r{int(self._config.spatial.radius_m)}m"

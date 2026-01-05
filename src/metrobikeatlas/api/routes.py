@@ -95,23 +95,55 @@ def list_stations(service: StationService = Depends(get_service)) -> list[Statio
 
 @router.get("/station/{station_id}/timeseries", response_model=StationTimeSeriesOut)
 def station_timeseries(
-    station_id: str, service: StationService = Depends(get_service)
+    station_id: str,
+    join_method: Optional[Literal["buffer", "nearest"]] = None,
+    radius_m: Optional[float] = None,
+    nearest_k: Optional[int] = None,
+    granularity: Optional[Literal["15min", "hour", "day"]] = None,
+    timezone: Optional[str] = None,
+    window_days: Optional[int] = None,
+    metro_series: Literal["auto", "ridership", "proxy"] = "auto",
+    service: StationService = Depends(get_service),
 ) -> StationTimeSeriesOut:
     try:
-        payload = service.station_timeseries(station_id)
+        payload = service.station_timeseries(
+            station_id,
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+            granularity=granularity,
+            timezone=timezone,
+            window_days=window_days,
+            metro_series=metro_series,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="Station not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return StationTimeSeriesOut.model_validate(payload)
 
 
 @router.get("/station/{station_id}/nearby_bike", response_model=list[NearbyBikeOut])
 def nearby_bike(
-    station_id: str, service: StationService = Depends(get_service)
+    station_id: str,
+    join_method: Optional[Literal["buffer", "nearest"]] = None,
+    radius_m: Optional[float] = None,
+    nearest_k: Optional[int] = None,
+    limit: Optional[int] = None,
+    service: StationService = Depends(get_service),
 ) -> list[NearbyBikeOut]:
     try:
-        payload = service.nearby_bike(station_id)
+        payload = service.nearby_bike(
+            station_id,
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+            limit=limit,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="Station not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return [
         NearbyBikeOut(
             id=s["station_id"],
@@ -138,12 +170,23 @@ def station_factors(
 
 @router.get("/station/{station_id}/similar", response_model=list[SimilarStationOut])
 def similar_stations(
-    station_id: str, service: StationService = Depends(get_service)
+    station_id: str,
+    top_k: Optional[int] = None,
+    metric: Optional[Literal["euclidean", "cosine"]] = None,
+    standardize: Optional[bool] = None,
+    service: StationService = Depends(get_service),
 ) -> list[SimilarStationOut]:
     try:
-        payload = service.similar_stations(station_id)
+        payload = service.similar_stations(
+            station_id,
+            top_k=top_k,
+            metric=metric,
+            standardize=standardize,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="Station not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return [
         SimilarStationOut(
             id=s["station_id"],

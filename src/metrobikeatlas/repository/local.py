@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Optional
 
 import pandas as pd
 
 from metrobikeatlas.analytics.similarity import find_similar_stations
 from metrobikeatlas.config.models import AppConfig
 from metrobikeatlas.preprocessing.temporal_align import align_timeseries, compute_rent_return_proxy
+from metrobikeatlas.utils.geo import haversine_m
+
+
+SpatialJoinMethod = Literal["buffer", "nearest"]
+Granularity = Literal["15min", "hour", "day"]
+SimilarityMetric = Literal["euclidean", "cosine"]
+MetroSeriesMode = Literal["auto", "ridership", "proxy"]
 
 
 class LocalRepository:
@@ -73,17 +80,24 @@ class LocalRepository:
             df["station_id"] = df["station_id"].astype(str)
         return df.to_dict(orient="records")
 
-    def nearby_bike(self, metro_station_id: str) -> list[dict[str, Any]]:
-        links = self._links[self._links["metro_station_id"] == metro_station_id].copy()
-        if links.empty:
-            raise KeyError(metro_station_id)
-
-        bikes = self._bike_stations.copy()
-        merged = links.merge(bikes, left_on="bike_station_id", right_on="station_id", how="left")
-        merged = merged.sort_values("distance_m")
-
+    def nearby_bike(
+        self,
+        metro_station_id: str,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        bikes = self._nearby_bike_df(
+            metro_station_id,
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+            limit=limit,
+        )
         out = []
-        for _, row in merged.iterrows():
+        for _, row in bikes.iterrows():
             out.append(
                 {
                     "station_id": str(row["station_id"]),
@@ -96,14 +110,44 @@ class LocalRepository:
             )
         return out
 
-    def station_timeseries(self, metro_station_id: str) -> dict[str, Any]:
-        # Bike series (aggregate nearby bike stations)
-        links = self._links[self._links["metro_station_id"] == metro_station_id].copy()
-        if links.empty:
-            raise KeyError(metro_station_id)
-        bike_ids = set(links["bike_station_id"].astype(str).tolist())
+    def station_timeseries(
+        self,
+        metro_station_id: str,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+        granularity: Optional[Granularity] = None,
+        timezone: Optional[str] = None,
+        window_days: Optional[int] = None,
+        metro_series: MetroSeriesMode = "auto",
+    ) -> dict[str, Any]:
+        """
+        Return aligned time series for a metro station.
+
+        - Spatial parameters choose which bike stations to aggregate.
+        - Temporal parameters define resampling granularity/timezone.
+        """
+
+        nearby = self._nearby_bike_df(
+            metro_station_id,
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+            limit=None,
+        )
+        bike_ids = set(nearby["station_id"].astype(str).tolist())
+
+        gran, tz = self._resolve_temporal(granularity=granularity, timezone=timezone)
+        window_days_value = None if window_days is None else max(int(window_days), 1)
 
         bike_df = self._bike_ts[self._bike_ts["station_id"].astype(str).isin(bike_ids)].copy()
+        if window_days_value is not None and not bike_df.empty:
+            bike_df["ts"] = pd.to_datetime(bike_df["ts"], utc=True, errors="coerce")
+            end_ts = bike_df["ts"].max()
+            if pd.notna(end_ts):
+                bike_df = bike_df[bike_df["ts"] >= (end_ts - pd.Timedelta(days=window_days_value))].copy()
+
         if not bike_df.empty and ("rent_proxy" not in bike_df.columns or "return_proxy" not in bike_df.columns):
             bike_df = compute_rent_return_proxy(
                 bike_df,
@@ -113,77 +157,146 @@ class LocalRepository:
             )
 
         bike_available_points: list[dict[str, Any]] = []
+        bike_rent_points: list[dict[str, Any]] = []
+        bike_return_points: list[dict[str, Any]] = []
         metro_proxy_points: list[dict[str, Any]] = []
+
         if not bike_df.empty:
-            # Availability is a state variable: resample per station (mean), then sum across stations.
             bike_available = align_timeseries(
                 bike_df,
                 ts_col="ts",
                 group_cols=("station_id",),
                 value_cols=("available_bikes",),
-                granularity=self._config.temporal.granularity,
-                timezone=self._config.temporal.timezone,
+                granularity=gran,
+                timezone=tz,
                 agg="mean",
             )
-            bike_available = bike_available.groupby("ts", as_index=False)["available_bikes"].sum()
-            bike_available = bike_available.sort_values("ts")
+            bike_available = bike_available.groupby("ts", as_index=False)["available_bikes"].sum().sort_values("ts")
             bike_available_points = [
                 {"ts": row["ts"], "value": float(row["available_bikes"])}
                 for _, row in bike_available.iterrows()
             ]
 
-            # Rent proxy is an event-like signal: sum within buckets per station, then sum across stations.
-            if "rent_proxy" in bike_df.columns:
-                bike_rent = align_timeseries(
-                    bike_df,
-                    ts_col="ts",
-                    group_cols=("station_id",),
-                    value_cols=("rent_proxy",),
-                    granularity=self._config.temporal.granularity,
-                    timezone=self._config.temporal.timezone,
-                    agg="sum",
-                )
-                bike_rent = bike_rent.groupby("ts", as_index=False)["rent_proxy"].sum()
-                bike_rent = bike_rent.sort_values("ts")
-                metro_proxy_points = [
-                    {"ts": row["ts"], "value": float(row["rent_proxy"])}
-                    for _, row in bike_rent.iterrows()
-                ]
+            bike_rent = align_timeseries(
+                bike_df,
+                ts_col="ts",
+                group_cols=("station_id",),
+                value_cols=("rent_proxy",),
+                granularity=gran,
+                timezone=tz,
+                agg="sum",
+            )
+            bike_rent = bike_rent.groupby("ts", as_index=False)["rent_proxy"].sum().sort_values("ts")
+            bike_rent_points = [
+                {"ts": row["ts"], "value": float(row["rent_proxy"])}
+                for _, row in bike_rent.iterrows()
+            ]
 
-        # Metro series: prefer real ridership if provided, otherwise fall back to the bike-derived proxy.
-        metro_is_proxy = True
-        metro_metric = "metro_flow_proxy_from_bike_rent"
-        metro_source = "bike_proxy"
-        metro_points: list[dict[str, Any]] = metro_proxy_points
+            bike_return = align_timeseries(
+                bike_df,
+                ts_col="ts",
+                group_cols=("station_id",),
+                value_cols=("return_proxy",),
+                granularity=gran,
+                timezone=tz,
+                agg="sum",
+            )
+            bike_return = (
+                bike_return.groupby("ts", as_index=False)["return_proxy"].sum().sort_values("ts")
+            )
+            bike_return_points = [
+                {"ts": row["ts"], "value": float(row["return_proxy"])}
+                for _, row in bike_return.iterrows()
+            ]
+
+            metro_proxy_points = bike_rent_points
+
+        metro_ridership_points: list[dict[str, Any]] = []
         if self._metro_ts is not None and not self._metro_ts.empty:
             metro_df = self._metro_ts[self._metro_ts["station_id"] == metro_station_id].copy()
             if not metro_df.empty:
-                metro_is_proxy = False
-                metro_metric = "metro_ridership"
-                metro_source = "metro_ridership"
-                metro_points = [
+                if window_days_value is not None:
+                    metro_df["ts"] = pd.to_datetime(metro_df["ts"], utc=True, errors="coerce")
+                    end_ts = metro_df["ts"].max()
+                    if pd.notna(end_ts):
+                        metro_df = metro_df[metro_df["ts"] >= (end_ts - pd.Timedelta(days=window_days_value))].copy()
+
+                metro_df = align_timeseries(
+                    metro_df,
+                    ts_col="ts",
+                    group_cols=("station_id",),
+                    value_cols=("value",),
+                    granularity=gran,
+                    timezone=tz,
+                    agg="sum",
+                )
+                metro_df = metro_df.sort_values("ts")
+                metro_ridership_points = [
                     {"ts": row["ts"], "value": float(row["value"])}
-                    for _, row in metro_df.sort_values("ts").iterrows()
+                    for _, row in metro_df.iterrows()
                 ]
 
-        return {
-            "station_id": metro_station_id,
-            "granularity": self._config.temporal.granularity,
-            "timezone": self._config.temporal.timezone,
-            "series": [
+        series: list[dict[str, Any]] = []
+        if metro_series in ("auto", "ridership") and metro_ridership_points:
+            series.append(
                 {
-                    "metric": metro_metric,
-                    "points": metro_points,
-                    "source": metro_source,
-                    "is_proxy": metro_is_proxy,
+                    "metric": "metro_ridership",
+                    "points": metro_ridership_points,
+                    "source": "metro_ridership",
+                    "is_proxy": False,
+                }
+            )
+        series.append(
+            {
+                "metric": "metro_flow_proxy_from_bike_rent",
+                "points": metro_proxy_points,
+                "source": "bike_proxy",
+                "is_proxy": True,
+            }
+        )
+        if metro_series == "proxy" and metro_ridership_points:
+            series.insert(
+                0,
+                series.pop(),  # move proxy first
+            )
+            series.insert(
+                1,
+                {
+                    "metric": "metro_ridership",
+                    "points": metro_ridership_points,
+                    "source": "metro_ridership",
+                    "is_proxy": False,
                 },
+            )
+
+        series.extend(
+            [
                 {
                     "metric": "bike_available_bikes_total",
                     "points": bike_available_points,
                     "source": "tdx_bike_availability",
                     "is_proxy": False,
                 },
-            ],
+                {
+                    "metric": "bike_rent_proxy_total",
+                    "points": bike_rent_points,
+                    "source": "tdx_bike_availability",
+                    "is_proxy": True,
+                },
+                {
+                    "metric": "bike_return_proxy_total",
+                    "points": bike_return_points,
+                    "source": "tdx_bike_availability",
+                    "is_proxy": True,
+                },
+            ]
+        )
+
+        return {
+            "station_id": metro_station_id,
+            "granularity": gran,
+            "timezone": tz,
+            "series": series,
         }
 
     def station_factors(self, metro_station_id: str) -> dict[str, Any]:
@@ -221,16 +334,29 @@ class LocalRepository:
         factors = sorted(factors, key=lambda x: x["name"])
         return {"station_id": metro_station_id, "factors": factors, "available": True}
 
-    def similar_stations(self, metro_station_id: str) -> list[dict[str, Any]]:
+    def similar_stations(
+        self,
+        metro_station_id: str,
+        *,
+        top_k: Optional[int] = None,
+        metric: Optional[SimilarityMetric] = None,
+        standardize: Optional[bool] = None,
+    ) -> list[dict[str, Any]]:
         if self._station_features is None or self._station_features.empty:
             return []
+
+        top_k_value = self._config.analytics.similarity.top_k if top_k is None else int(top_k)
+        metric_value = self._config.analytics.similarity.metric if metric is None else metric
+        standardize_value = (
+            self._config.analytics.similarity.standardize if standardize is None else bool(standardize)
+        )
 
         sim = find_similar_stations(
             self._station_features,
             station_id=metro_station_id,
-            top_k=self._config.analytics.similarity.top_k,
-            metric=self._config.analytics.similarity.metric,
-            standardize=self._config.analytics.similarity.standardize,
+            top_k=top_k_value,
+            metric=metric_value,
+            standardize=standardize_value,
         )
         merged = sim.merge(
             self._metro_stations[["station_id", "name"]],
@@ -258,6 +384,74 @@ class LocalRepository:
                 item["cluster"] = int(cluster_map[station_id])
             out.append(item)
         return out
+
+    def _resolve_spatial(
+        self,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+    ) -> tuple[SpatialJoinMethod, float, int]:
+        method: SpatialJoinMethod = join_method or self._config.spatial.join_method
+        if method not in ("buffer", "nearest"):
+            raise ValueError(f"Unsupported join_method: {method}")
+
+        r = self._config.spatial.radius_m if radius_m is None else float(radius_m)
+        k = self._config.spatial.nearest_k if nearest_k is None else int(nearest_k)
+        return method, float(r), int(k)
+
+    def _resolve_temporal(
+        self,
+        *,
+        granularity: Optional[Granularity] = None,
+        timezone: Optional[str] = None,
+    ) -> tuple[Granularity, str]:
+        gran: Granularity = granularity or self._config.temporal.granularity
+        if gran not in ("15min", "hour", "day"):
+            raise ValueError(f"Unsupported granularity: {gran}")
+        tz = self._config.temporal.timezone if timezone is None else str(timezone)
+        return gran, tz
+
+    def _nearby_bike_df(
+        self,
+        metro_station_id: str,
+        *,
+        join_method: Optional[SpatialJoinMethod] = None,
+        radius_m: Optional[float] = None,
+        nearest_k: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> pd.DataFrame:
+        metro = self._metro_stations.copy()
+        metro["station_id"] = metro["station_id"].astype(str)
+        hit = metro[metro["station_id"] == str(metro_station_id)]
+        if hit.empty:
+            raise KeyError(metro_station_id)
+
+        row = hit.iloc[0]
+        lat = float(row["lat"])
+        lon = float(row["lon"])
+
+        method, radius, k = self._resolve_spatial(
+            join_method=join_method,
+            radius_m=radius_m,
+            nearest_k=nearest_k,
+        )
+
+        bikes = self._bike_stations.copy()
+        bikes["station_id"] = bikes["station_id"].astype(str)
+        bikes["distance_m"] = bikes.apply(
+            lambda r: haversine_m(lat, lon, float(r["lat"]), float(r["lon"])), axis=1
+        )
+
+        if method == "buffer":
+            bikes = bikes[bikes["distance_m"] <= float(radius)].copy()
+        else:
+            bikes = bikes.nsmallest(max(int(k), 1), "distance_m").copy()
+
+        bikes = bikes.sort_values("distance_m")
+        if limit is not None:
+            bikes = bikes.head(max(int(limit), 0))
+        return bikes
 
     def analytics_overview(self, *, top_n: int = 20) -> dict[str, Any]:
         """
