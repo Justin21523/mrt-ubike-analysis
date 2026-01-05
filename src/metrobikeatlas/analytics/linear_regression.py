@@ -15,7 +15,9 @@ class LinearRegressionResult:
     n: int
 
 
-def _numeric_feature_cols(df: pd.DataFrame, *, exclude: Iterable[str] = ("station_id", "district")) -> list[str]:
+def _numeric_feature_cols(
+    df: pd.DataFrame, *, exclude: Iterable[str] = ("station_id", "district", "value")
+) -> list[str]:
     excluded = set(exclude)
     cols = []
     for col in df.columns:
@@ -72,4 +74,3 @@ def fit_linear_regression(
     intercept = float(beta[0])
     coefs = {col: float(beta[i + 1]) for i, col in enumerate(cols)}
     return LinearRegressionResult(intercept=intercept, coefficients=coefs, r2=r2, n=int(len(y)))
-

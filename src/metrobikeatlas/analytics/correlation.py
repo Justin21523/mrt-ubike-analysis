@@ -5,7 +5,9 @@ from typing import Iterable, Optional
 import pandas as pd
 
 
-def _numeric_feature_cols(df: pd.DataFrame, *, exclude: Iterable[str] = ("station_id", "district")) -> list[str]:
+def _numeric_feature_cols(
+    df: pd.DataFrame, *, exclude: Iterable[str] = ("station_id", "district", "value")
+) -> list[str]:
     excluded = set(exclude)
     cols = []
     for col in df.columns:
@@ -52,4 +54,3 @@ def compute_feature_correlations(
         return out
     out = out.sort_values("correlation", ascending=False).reset_index(drop=True)
     return out
-
