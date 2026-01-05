@@ -64,6 +64,10 @@ Built by `python scripts/build_analytics.py`:
 - `data/gold/regression_coefficients.csv` (simple OLS coefficients, standardized X)
 - `data/gold/station_clusters.csv` (K-means cluster labels; optional UI hint)
 
+The web app uses these outputs (when present) to:
+- color stations by cluster
+- show a small global summary in the sidebar (`GET /analytics/overview`)
+
 ## Configuration
 
 Edit `config/default.json`:

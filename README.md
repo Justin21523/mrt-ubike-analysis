@@ -45,6 +45,9 @@ The web UI is served at `http://127.0.0.1:8000/`.
 3. Run basic analytics (correlation/regression/clustering):
    - `python scripts/build_analytics.py`
 
+When `data/gold/station_clusters.csv` exists, the map colors metro stations by cluster and the UI shows an
+analytics summary (served from `/analytics/overview`).
+
 ### Optional: build POIs + districts (Stage 4)
 
 - Generate POIs from OpenStreetMap (Overpass): `python scripts/fetch_poi_overpass.py`
