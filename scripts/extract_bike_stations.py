@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
 from metrobikeatlas.config.loader import load_config
 from metrobikeatlas.ingestion.bronze import write_bronze_json
 from metrobikeatlas.ingestion.tdx_base import TDXClient, TDXCredentials
+from metrobikeatlas.utils.logging import configure_logging
 
 
 def main() -> None:
-    config = load_config()
+    parser = argparse.ArgumentParser(description="Fetch bike station metadata from TDX and write to Bronze.")
+    parser.add_argument("--config", default=None, help="Config JSON path.")
+    parser.add_argument("--bronze-dir", default="data/bronze")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    configure_logging(config.logging)
     creds = TDXCredentials.from_env()
 
-    bronze_dir = Path("data/bronze")
+    bronze_dir = Path(args.bronze_dir)
     bronze_dir.mkdir(parents=True, exist_ok=True)
 
     with TDXClient(
@@ -41,4 +49,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
