@@ -45,6 +45,7 @@ def _test_config() -> AppConfig:
             station_features_path=Path("data/gold/station_features.csv"),
             station_targets_path=Path("data/gold/station_targets.csv"),
             timeseries_window_days=7,
+            admin_boundaries_geojson_path=Path("data/external/admin_boundaries.geojson"),
             poi=POISettings(
                 path=Path("data/external/poi.csv"),
                 radii_m=[300, 500],

@@ -69,6 +69,7 @@ class FeatureSettings:
     station_features_path: Path
     station_targets_path: Path
     timeseries_window_days: int
+    admin_boundaries_geojson_path: Optional[Path]
     poi: Optional[POISettings]
     station_district_map_path: Optional[Path]
 

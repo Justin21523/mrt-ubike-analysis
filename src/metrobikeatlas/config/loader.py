@@ -122,6 +122,11 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
         None if not district_map_value else _as_path(str(district_map_value), base_dir=base_dir)
     )
 
+    boundaries_value = features_raw.get("admin_boundaries_geojson_path")
+    boundaries_path = (
+        None if not boundaries_value else _as_path(str(boundaries_value), base_dir=base_dir)
+    )
+
     features = FeatureSettings(
         station_features_path=_as_path(
             str(features_raw.get("station_features_path", "data/gold/station_features.csv")),
@@ -132,6 +137,7 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
             base_dir=base_dir,
         ),
         timeseries_window_days=int(features_raw.get("timeseries_window_days", 7)),
+        admin_boundaries_geojson_path=boundaries_path,
         poi=poi,
         station_district_map_path=district_map_path,
     )
