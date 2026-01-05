@@ -36,6 +36,15 @@ def load_dotenv_if_available(path: str = ".env") -> None:
     load_dotenv(path)
 
 
+def _parse_bool(value: str) -> Optional[bool]:
+    v = value.strip().lower()
+    if v in {"1", "true", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
 def _as_path(value: str, *, base_dir: Path) -> Path:
     candidate = Path(value)
     return candidate if candidate.is_absolute() else (base_dir / candidate)
@@ -60,14 +69,16 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
     raw = json.loads(config_path.read_text(encoding="utf-8"))
 
     app_raw: Mapping[str, Any] = raw.get("app", {})
+    demo_env = os.getenv("METROBIKEATLAS_DEMO_MODE")
+    demo_override = _parse_bool(demo_env) if demo_env else None
     app = AppSettings(
         name=str(app_raw.get("name", "MetroBikeAtlas")),
-        demo_mode=bool(app_raw.get("demo_mode", True)),
+        demo_mode=bool(app_raw.get("demo_mode", True)) if demo_override is None else demo_override,
     )
 
     tdx_raw: Mapping[str, Any] = raw.get("tdx", {})
-    base_url = tdx_raw.get("base_url")
-    token_url = tdx_raw.get("token_url")
+    base_url = os.getenv("TDX_BASE_URL") or tdx_raw.get("base_url")
+    token_url = os.getenv("TDX_TOKEN_URL") or tdx_raw.get("token_url")
     if not base_url or not token_url:
         raise ValueError("Config missing required fields: tdx.base_url and/or tdx.token_url")
     metro_raw: Mapping[str, Any] = tdx_raw.get("metro", {})
