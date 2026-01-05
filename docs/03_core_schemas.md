@@ -20,6 +20,12 @@ Purpose: unify metro/bike time series into a single pattern for aggregation and 
 
 Suggested fields: `entity_type` (`metro`/`bike`), `station_id`, `ts` (Asia/Taipei), `granularity`, `metric`, `value`, `source`.
 
+### MVP note: metro flow availability
+
+Station-level metro ridership is not consistently available across systems. For the MVP, the API can fall back to
+`metro_flow_proxy_from_bike_rent` derived from bike availability deltas near the station. If you have a real metro
+ridership dataset, provide `data/silver/metro_timeseries.csv` with columns `station_id`, `ts`, `value`.
+
 ## Python types
 
 Defined in: `src/metrobikeatlas/schemas/core.py`
