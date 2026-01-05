@@ -31,7 +31,8 @@ The web UI is served at `http://127.0.0.1:8000/`.
    - `python scripts/extract_metro_stations.py`
    - `python scripts/extract_bike_stations.py`
 3. Collect bike availability snapshots over time (to form a time series):
-   - `python scripts/collect_bike_availability.py` (run repeatedly, e.g. every 5 minutes)
+   - One-shot: `python scripts/collect_bike_availability.py` (run repeatedly, e.g. every 5 minutes)
+   - Loop helper: `python scripts/collect_bike_availability_loop.py --interval-seconds 300 --duration-seconds 3600`
 4. Build Silver tables + metro↔bike links:
    - `python scripts/build_silver.py`
 
@@ -59,7 +60,7 @@ analytics summary (served from `/analytics/overview`).
 
 If `data/silver/metro_timeseries.csv` is not present, the API returns `metro_flow_proxy_from_bike_rent`
 computed from bike availability deltas near each metro station. Provide `metro_timeseries.csv` (columns:
-`station_id`, `ts`, `value`) to override the proxy with real ridership/flow.
+`station_id`, `ts`, `value`) to override the proxy with real ridership/flow (see `python scripts/import_metro_timeseries.py -h`).
 
 ## Key paths
 

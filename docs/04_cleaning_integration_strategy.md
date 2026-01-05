@@ -27,6 +27,8 @@ Key principles:
 ### Time series (flows / metrics)
 
 - **Timezone**: convert everything to `Asia/Taipei` with tz-aware timestamps (avoid string time comparisons).
+- **External metro ridership**: normalize to `data/silver/metro_timeseries.csv` (columns: `station_id`, `ts`, `value`)
+  using `python scripts/import_metro_timeseries.py ...` so the API can prefer real data over proxies.
 - **Granularity**: keep source granularity in Bronze; aggregate using explicit rules (sum/mean/last) in Silver/Gold.
 - **Missingness**:
   - For counts (entries/exits/rents), missing data is not zero — distinguish “no event” vs “missing report”.

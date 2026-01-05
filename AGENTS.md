@@ -23,7 +23,8 @@
 - Lint: `ruff check .` (fix with `ruff check . --fix`)
 - (Optional) Format: `ruff format .`
 - Run API + web (demo mode by default): `python scripts/run_api.py`
-- Build Silver (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability.py && python scripts/build_silver.py`
+- Build Silver (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability_loop.py --interval-seconds 300 --duration-seconds 3600 && python scripts/build_silver.py`
+- (Optional) Import metro ridership: `python scripts/import_metro_timeseries.py path/to.csv`
 - Build factors + analytics: `python scripts/build_features.py && python scripts/build_analytics.py`
 - Build POIs + districts (optional): `python scripts/fetch_poi_overpass.py && python scripts/build_station_district_map.py`
 
@@ -46,5 +47,5 @@
 
 ## Commit & Pull Request Guidelines
 
-- No git history yet; use Conventional Commits (e.g., `feat(tdx): add station endpoint`, `fix(schema): tighten types`).
+- Use Conventional Commits (see `git log --oneline`), e.g. `feat(tdx): add station endpoint`, `fix(schema): tighten types`.
 - PRs: explain the data source/endpoints, include a brief schema impact note, and add/adjust tests + docs when behavior changes.
