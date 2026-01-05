@@ -23,7 +23,9 @@
 - Lint: `ruff check .` (fix with `ruff check . --fix`)
 - (Optional) Format: `ruff format .`
 - Run API + web (demo mode by default): `python scripts/run_api.py`
+- Run end-to-end pipeline (real data): `python scripts/run_pipeline_mvp.py --collect-duration-seconds 3600 --collect-interval-seconds 300`
 - Build Silver (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability_loop.py --interval-seconds 300 --duration-seconds 3600 && python scripts/build_silver.py`
+- Validate Silver: `python scripts/validate_silver.py --strict`
 - (Optional) Import metro ridership: `python scripts/import_metro_timeseries.py path/to.csv`
 - Build factors + analytics: `python scripts/build_features.py && python scripts/build_analytics.py`
 - Build POIs + districts (optional): `python scripts/fetch_poi_overpass.py && python scripts/build_station_district_map.py`

@@ -36,6 +36,16 @@ The web UI is served at `http://127.0.0.1:8000/`.
 4. Build Silver tables + metro↔bike links:
    - `python scripts/build_silver.py`
 
+### One-command pipeline (real data)
+
+Run Bronze → Silver → Gold in one go:
+
+- `python scripts/run_pipeline_mvp.py --collect-duration-seconds 3600 --collect-interval-seconds 300`
+
+Validate Silver (schema + basic sanity checks):
+
+- `python scripts/validate_silver.py --strict`
+
 ### Build factors + analytics (Stage 3)
 
 1. (Optional) Add external datasets:
@@ -61,6 +71,12 @@ analytics summary (served from `/analytics/overview`).
 If `data/silver/metro_timeseries.csv` is not present, the API returns `metro_flow_proxy_from_bike_rent`
 computed from bike availability deltas near each metro station. Provide `metro_timeseries.csv` (columns:
 `station_id`, `ts`, `value`) to override the proxy with real ridership/flow (see `python scripts/import_metro_timeseries.py -h`).
+
+## Environment variables (optional)
+
+- `METROBIKEATLAS_CONFIG_PATH`: choose a config JSON (default: `config/default.json`)
+- `METROBIKEATLAS_DEMO_MODE`: override demo mode (`true`/`false`)
+- `TDX_BASE_URL`, `TDX_TOKEN_URL`: override TDX endpoints (rarely needed)
 
 ## Key paths
 

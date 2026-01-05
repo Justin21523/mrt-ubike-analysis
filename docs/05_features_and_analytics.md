@@ -56,6 +56,9 @@ Built by `python scripts/build_features.py`:
 If station-level metro ridership is not available, `station_targets.csv` uses:
 - `metro_flow_proxy_from_bike_rent`: sum of `rent_proxy` from nearby bike stations over the last N days (configurable)
 
+If `data/silver/metro_timeseries.csv` exists, `station_targets.csv` also includes:
+- `metro_ridership`: sum of imported ridership/flow values over the last N days
+
 ## Analytics outputs (Gold)
 
 Built by `python scripts/build_analytics.py`:
