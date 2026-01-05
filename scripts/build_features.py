@@ -34,6 +34,9 @@ def main() -> None:
     bike_ts_path = silver_dir / "bike_timeseries.csv"
     bike_ts = pd.read_csv(bike_ts_path, parse_dates=["ts"]) if bike_ts_path.exists() else pd.DataFrame()
 
+    metro_ts_path = silver_dir / "metro_timeseries.csv"
+    metro_ts = pd.read_csv(metro_ts_path, parse_dates=["ts"]) if metro_ts_path.exists() else None
+
     poi = None
     if config.features.poi is not None and config.features.poi.path.exists():
         poi = load_poi_csv(config.features.poi.path)
@@ -52,6 +55,7 @@ def main() -> None:
         bike_stations=bike,
         links=links,
         bike_timeseries=bike_ts,
+        metro_timeseries=metro_ts,
         poi=poi,
         district_map=district_map,
     )
@@ -67,4 +71,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

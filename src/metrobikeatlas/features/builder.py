@@ -301,6 +301,7 @@ def build_station_targets(
     config: AppConfig,
     bike_timeseries: pd.DataFrame,
     links: pd.DataFrame,
+    metro_timeseries: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Build a station-level target metric used for EDA (not a ground-truth ridership).
@@ -309,44 +310,64 @@ def build_station_targets(
     - Sum of `rent_proxy` over the last N days for bike stations assigned to the nearest metro station.
     """
 
-    if bike_timeseries.empty or links.empty:
+    targets: list[pd.DataFrame] = []
+
+    if not bike_timeseries.empty and not links.empty:
+        ts = bike_timeseries.copy()
+        ts["station_id"] = ts["station_id"].astype(str)
+        ts["ts"] = pd.to_datetime(ts["ts"], utc=True, errors="coerce")
+        ts = ts.dropna(subset=["ts"])
+
+        if "rent_proxy" not in ts.columns or "return_proxy" not in ts.columns:
+            ts = compute_rent_return_proxy(
+                ts,
+                station_id_col="station_id",
+                ts_col="ts",
+                available_bikes_col="available_bikes",
+            )
+
+        end_ts = ts["ts"].max()
+        window_start = end_ts - pd.Timedelta(days=int(config.features.timeseries_window_days))
+        ts = ts[ts["ts"] >= window_start].copy()
+
+        # Assign each bike station to the nearest metro station to avoid double counting.
+        links_sorted = links.sort_values("distance_m").copy()
+        links_sorted["bike_station_id"] = links_sorted["bike_station_id"].astype(str)
+        primary = links_sorted.drop_duplicates(subset=["bike_station_id"], keep="first")[
+            ["bike_station_id", "metro_station_id"]
+        ].copy()
+        primary = primary.rename(columns={"bike_station_id": "station_id", "metro_station_id": "station_id_metro"})
+
+        joined = ts.merge(primary, on="station_id", how="inner")
+        if not joined.empty:
+            grouped = joined.groupby("station_id_metro", as_index=False)["rent_proxy"].sum()
+            grouped = grouped.rename(columns={"station_id_metro": "station_id", "rent_proxy": "value"})
+            grouped["metric"] = "metro_flow_proxy_from_bike_rent"
+            grouped["window_days"] = int(config.features.timeseries_window_days)
+            targets.append(grouped[["station_id", "metric", "value", "window_days"]])
+
+    if metro_timeseries is not None and not metro_timeseries.empty:
+        mt = metro_timeseries.copy()
+        if {"station_id", "ts", "value"} - set(mt.columns):
+            logger.warning("metro_timeseries missing required columns; expected station_id, ts, value.")
+        else:
+            mt["station_id"] = mt["station_id"].astype(str)
+            mt["ts"] = pd.to_datetime(mt["ts"], utc=True, errors="coerce")
+            mt["value"] = pd.to_numeric(mt["value"], errors="coerce")
+            mt = mt.dropna(subset=["ts", "value"])
+            if not mt.empty:
+                end_ts = mt["ts"].max()
+                window_start = end_ts - pd.Timedelta(days=int(config.features.timeseries_window_days))
+                mt = mt[mt["ts"] >= window_start].copy()
+                grouped = mt.groupby("station_id", as_index=False)["value"].sum()
+                grouped["metric"] = "metro_ridership"
+                grouped["window_days"] = int(config.features.timeseries_window_days)
+                targets.append(grouped[["station_id", "metric", "value", "window_days"]])
+
+    if not targets:
         return pd.DataFrame(columns=["station_id", "metric", "value", "window_days"])
 
-    ts = bike_timeseries.copy()
-    ts["station_id"] = ts["station_id"].astype(str)
-    ts["ts"] = pd.to_datetime(ts["ts"], utc=True, errors="coerce")
-    ts = ts.dropna(subset=["ts"])
-
-    if "rent_proxy" not in ts.columns or "return_proxy" not in ts.columns:
-        ts = compute_rent_return_proxy(
-            ts,
-            station_id_col="station_id",
-            ts_col="ts",
-            available_bikes_col="available_bikes",
-        )
-
-    end_ts = ts["ts"].max()
-    window_start = end_ts - pd.Timedelta(days=int(config.features.timeseries_window_days))
-    ts = ts[ts["ts"] >= window_start].copy()
-
-    # Assign each bike station to the nearest metro station to avoid double counting.
-    links_sorted = links.sort_values("distance_m").copy()
-    links_sorted["bike_station_id"] = links_sorted["bike_station_id"].astype(str)
-    primary = links_sorted.drop_duplicates(subset=["bike_station_id"], keep="first")[
-        ["bike_station_id", "metro_station_id"]
-    ].copy()
-    primary = primary.rename(columns={"bike_station_id": "station_id", "metro_station_id": "station_id_metro"})
-
-    joined = ts.merge(primary, on="station_id", how="inner")
-    if joined.empty:
-        return pd.DataFrame(columns=["station_id", "metric", "value", "window_days"])
-
-    grouped = joined.groupby("station_id_metro", as_index=False)["rent_proxy"].sum()
-    grouped = grouped.rename(columns={"station_id_metro": "station_id", "rent_proxy": "value"})
-    grouped["metric"] = "metro_flow_proxy_from_bike_rent"
-    grouped["window_days"] = int(config.features.timeseries_window_days)
-
-    return grouped[["station_id", "metric", "value", "window_days"]]
+    return pd.concat(targets, ignore_index=True)
 
 
 def build_feature_artifacts(
@@ -356,6 +377,7 @@ def build_feature_artifacts(
     bike_stations: pd.DataFrame,
     links: pd.DataFrame,
     bike_timeseries: pd.DataFrame,
+    metro_timeseries: Optional[pd.DataFrame] = None,
     poi: Optional[pd.DataFrame] = None,
     district_map: Optional[pd.DataFrame] = None,
 ) -> FeatureArtifacts:
@@ -368,5 +390,10 @@ def build_feature_artifacts(
         poi=poi,
         district_map=district_map,
     )
-    station_targets = build_station_targets(config=config, bike_timeseries=bike_timeseries, links=links)
+    station_targets = build_station_targets(
+        config=config,
+        bike_timeseries=bike_timeseries,
+        links=links,
+        metro_timeseries=metro_timeseries,
+    )
     return FeatureArtifacts(station_features=station_features, station_targets=station_targets)
