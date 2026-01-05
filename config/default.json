@@ -1,0 +1,46 @@
+{
+  "app": {
+    "name": "MetroBikeAtlas",
+    "demo_mode": true
+  },
+  "tdx": {
+    "base_url": "https://tdx.transportdata.tw/api/basic/v2",
+    "token_url": "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token",
+    "metro": {
+      "cities": ["Taipei"],
+      "stations_path_template": "Rail/Metro/Station/City/{city}",
+      "ridership_path_template": null
+    },
+    "bike": {
+      "cities": ["Taipei"],
+      "stations_path_template": "Bike/Station/City/{city}",
+      "availability_path_template": "Bike/Availability/City/{city}"
+    }
+  },
+  "temporal": {
+    "timezone": "Asia/Taipei",
+    "granularity": "hour"
+  },
+  "spatial": {
+    "join_method": "buffer",
+    "radius_m": 500,
+    "nearest_k": 3
+  },
+  "cache": {
+    "dir": "data/cache",
+    "ttl_seconds": 3600
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s %(levelname)s %(name)s - %(message)s"
+  },
+  "web": {
+    "static_dir": "web",
+    "map": {
+      "center_lat": 25.0375,
+      "center_lon": 121.5637,
+      "zoom": 12
+    }
+  }
+}
+
