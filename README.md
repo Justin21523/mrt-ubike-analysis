@@ -45,6 +45,13 @@ The web UI is served at `http://127.0.0.1:8000/`.
 3. Run basic analytics (correlation/regression/clustering):
    - `python scripts/build_analytics.py`
 
+### Optional: build POIs + districts (Stage 4)
+
+- Generate POIs from OpenStreetMap (Overpass): `python scripts/fetch_poi_overpass.py`
+- Map metro stations to districts using admin boundaries:
+  - Provide `data/external/admin_boundaries.geojson`
+  - Run `python scripts/build_station_district_map.py`
+
 ### Metro curve fallback
 
 If `data/silver/metro_timeseries.csv` is not present, the API returns `metro_flow_proxy_from_bike_rent`

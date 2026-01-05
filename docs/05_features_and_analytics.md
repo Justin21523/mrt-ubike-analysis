@@ -18,6 +18,11 @@ Built by `python scripts/build_silver.py`:
 
 These are **not** committed to git. Put them under `data/external/`.
 
+If you don’t already have curated datasets, you can generate a starting point:
+
+- POIs from OpenStreetMap: `python scripts/fetch_poi_overpass.py`
+- Station→district map from admin boundaries: `python scripts/build_station_district_map.py`
+
 1) POI dataset: `data/external/poi.csv`
 
 Required columns:
@@ -33,6 +38,11 @@ Optional columns:
 Required columns:
 - `station_id` (metro station id, matches `metro_stations.csv`)
 - `district` (string)
+
+3) Admin boundaries (GeoJSON): `data/external/admin_boundaries.geojson`
+
+- GeoJSON `FeatureCollection` with Polygon/MultiPolygon geometries.
+- Must contain a district name property (defaults: `district`, `town`, `TOWNNAME`, `NAME`, `name`).
 
 ## Feature outputs (Gold)
 
@@ -59,6 +69,7 @@ Built by `python scripts/build_analytics.py`:
 Edit `config/default.json`:
 
 - `features.timeseries_window_days`
+- `features.time_patterns` (peak windows used for time-pattern features)
+- `features.accessibility.bike` (weights for the composite accessibility score)
 - `features.poi.radii_m` and `features.poi.categories`
 - `analytics.similarity.top_k` and `analytics.clustering.k`
-

@@ -25,6 +25,7 @@
 - Run API + web (demo mode by default): `python scripts/run_api.py`
 - Build Silver (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability.py && python scripts/build_silver.py`
 - Build factors + analytics: `python scripts/build_features.py && python scripts/build_analytics.py`
+- Build POIs + districts (optional): `python scripts/fetch_poi_overpass.py && python scripts/build_station_district_map.py`
 
 ## Coding Style & Naming Conventions
 

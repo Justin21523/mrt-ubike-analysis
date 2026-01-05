@@ -23,6 +23,7 @@ ENV/
 # Data (ignore content; keep structure markers)
 data/**
 !data/README.md
+!data/external/README.md
 !data/**/
 !data/**/.gitkeep
 
