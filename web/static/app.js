@@ -1,0 +1,100 @@
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+  return await res.json();
+}
+
+function toChartData(points) {
+  return {
+    labels: points.map((p) => new Date(p.ts).toLocaleString()),
+    values: points.map((p) => p.value),
+  };
+}
+
+function buildChart(canvas, label) {
+  return new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label,
+          data: [],
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { type: "category", ticks: { maxTicksLimit: 6 } },
+        y: { beginAtZero: true },
+      },
+    },
+  });
+}
+
+function setChartData(chart, points) {
+  const d = toChartData(points);
+  chart.data.labels = d.labels;
+  chart.data.datasets[0].data = d.values;
+  chart.update();
+}
+
+function setNearbyList(items) {
+  const list = document.getElementById("nearbyList");
+  list.innerHTML = "";
+  for (const s of items) {
+    const li = document.createElement("li");
+    li.textContent = `${s.name} · ${Math.round(s.distance_m)}m`;
+    list.appendChild(li);
+  }
+}
+
+async function main() {
+  const stations = await fetchJson("/stations");
+
+  const map = L.map("map").setView([25.0375, 121.5637], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+
+  const metroChart = buildChart(document.getElementById("metroChart"), "metro");
+  const bikeChart = buildChart(document.getElementById("bikeChart"), "bike");
+
+  for (const s of stations) {
+    const marker = L.circleMarker([s.lat, s.lon], {
+      radius: 6,
+      color: "#2a6fdb",
+      fillColor: "#2a6fdb",
+      fillOpacity: 0.9,
+      weight: 2,
+    });
+
+    marker.on("click", async () => {
+      document.getElementById("stationName").textContent = s.name;
+      document.getElementById("stationMeta").textContent = `${s.id} · ${s.city ?? ""}`;
+
+      const ts = await fetchJson(`/station/${encodeURIComponent(s.id)}/timeseries`);
+      const metro = ts.series.find((x) => x.metric.startsWith("metro"))?.points ?? [];
+      const bike = ts.series.find((x) => x.metric.startsWith("bike"))?.points ?? [];
+
+      setChartData(metroChart, metro);
+      setChartData(bikeChart, bike);
+
+      const nearby = await fetchJson(`/station/${encodeURIComponent(s.id)}/nearby_bike`);
+      setNearbyList(nearby);
+    });
+
+    marker.addTo(map);
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  alert(`Failed to load app: ${err.message}`);
+});

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetroBikeAtlas</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="title">MetroBikeAtlas</div>
+      <div class="subtitle">Click a metro station to view metro & bike time series</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <div id="map" class="map"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div id="stationName" class="panel-title">Select a station</div>
+          <div id="stationMeta" class="panel-meta"></div>
+        </div>
+
+        <div class="charts">
+          <div class="chart-card">
+            <div class="chart-title">Metro</div>
+            <canvas id="metroChart"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Bike</div>
+            <canvas id="bikeChart"></canvas>
+          </div>
+        </div>
+
+        <div class="nearby">
+          <div class="nearby-title">Nearby bike stations</div>
+          <ul id="nearbyList" class="nearby-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
