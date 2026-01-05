@@ -23,7 +23,8 @@
 - Lint: `ruff check .` (fix with `ruff check . --fix`)
 - (Optional) Format: `ruff format .`
 - Run API + web (demo mode by default): `python scripts/run_api.py`
-- Build local data (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability.py && python scripts/build_silver.py`
+- Build Silver (requires TDX creds): `python scripts/extract_metro_stations.py && python scripts/extract_bike_stations.py && python scripts/collect_bike_availability.py && python scripts/build_silver.py`
+- Build factors + analytics: `python scripts/build_features.py && python scripts/build_analytics.py`
 
 ## Coding Style & Naming Conventions
 

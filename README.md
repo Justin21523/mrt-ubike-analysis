@@ -35,6 +35,16 @@ The web UI is served at `http://127.0.0.1:8000/`.
 4. Build Silver tables + metro↔bike links:
    - `python scripts/build_silver.py`
 
+### Build factors + analytics (Stage 3)
+
+1. (Optional) Add external datasets:
+   - `data/external/poi.csv`
+   - `data/external/metro_station_district.csv`
+2. Build station-level factors + targets:
+   - `python scripts/build_features.py`
+3. Run basic analytics (correlation/regression/clustering):
+   - `python scripts/build_analytics.py`
+
 ### Metro curve fallback
 
 If `data/silver/metro_timeseries.csv` is not present, the API returns `metro_flow_proxy_from_bike_rent`
