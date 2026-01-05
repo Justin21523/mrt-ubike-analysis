@@ -65,11 +65,34 @@ class POISettings:
 
 
 @dataclass(frozen=True)
+class FeatureTimePatternSettings:
+    peak_am_start_hour: int
+    peak_am_end_hour: int
+    peak_pm_start_hour: int
+    peak_pm_end_hour: int
+
+
+@dataclass(frozen=True)
+class BikeAccessibilityWeights:
+    w_station_count: float
+    w_capacity_sum: float
+    w_distance_mean_m: float
+    bias: float = 0.0
+
+
+@dataclass(frozen=True)
+class AccessibilitySettings:
+    bike: BikeAccessibilityWeights
+
+
+@dataclass(frozen=True)
 class FeatureSettings:
     station_features_path: Path
     station_targets_path: Path
     timeseries_window_days: int
     admin_boundaries_geojson_path: Optional[Path]
+    time_patterns: FeatureTimePatternSettings
+    accessibility: AccessibilitySettings
     poi: Optional[POISettings]
     station_district_map_path: Optional[Path]
 

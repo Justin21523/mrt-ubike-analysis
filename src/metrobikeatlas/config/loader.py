@@ -6,12 +6,15 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from metrobikeatlas.config.models import (
+    AccessibilitySettings,
     AnalyticsSettings,
     AppConfig,
     AppSettings,
+    BikeAccessibilityWeights,
     CacheSettings,
     ClusteringSettings,
     FeatureSettings,
+    FeatureTimePatternSettings,
     LoggingSettings,
     POISettings,
     SimilaritySettings,
@@ -127,6 +130,25 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
         None if not boundaries_value else _as_path(str(boundaries_value), base_dir=base_dir)
     )
 
+    time_patterns_raw: Mapping[str, Any] = features_raw.get("time_patterns", {})
+    time_patterns = FeatureTimePatternSettings(
+        peak_am_start_hour=int(time_patterns_raw.get("peak_am_start_hour", 7)),
+        peak_am_end_hour=int(time_patterns_raw.get("peak_am_end_hour", 10)),
+        peak_pm_start_hour=int(time_patterns_raw.get("peak_pm_start_hour", 17)),
+        peak_pm_end_hour=int(time_patterns_raw.get("peak_pm_end_hour", 20)),
+    )
+
+    accessibility_raw: Mapping[str, Any] = features_raw.get("accessibility", {})
+    bike_access_raw: Mapping[str, Any] = accessibility_raw.get("bike", {})
+    accessibility = AccessibilitySettings(
+        bike=BikeAccessibilityWeights(
+            w_station_count=float(bike_access_raw.get("w_station_count", 1.0)),
+            w_capacity_sum=float(bike_access_raw.get("w_capacity_sum", 0.02)),
+            w_distance_mean_m=float(bike_access_raw.get("w_distance_mean_m", -0.005)),
+            bias=float(bike_access_raw.get("bias", 0.0)),
+        )
+    )
+
     features = FeatureSettings(
         station_features_path=_as_path(
             str(features_raw.get("station_features_path", "data/gold/station_features.csv")),
@@ -138,6 +160,8 @@ def load_config(path: Optional[str | Path] = None, *, base_dir: Optional[Path] =
         ),
         timeseries_window_days=int(features_raw.get("timeseries_window_days", 7)),
         admin_boundaries_geojson_path=boundaries_path,
+        time_patterns=time_patterns,
+        accessibility=accessibility,
         poi=poi,
         station_district_map_path=district_map_path,
     )

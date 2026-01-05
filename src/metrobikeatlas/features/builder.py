@@ -67,6 +67,7 @@ def build_station_features(
     metro_stations: pd.DataFrame,
     bike_stations: pd.DataFrame,
     links: pd.DataFrame,
+    bike_timeseries: Optional[pd.DataFrame] = None,
     poi: Optional[pd.DataFrame] = None,
     district_map: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
@@ -124,6 +125,19 @@ def build_station_features(
     }
     features = features.rename(columns=rename_map)
 
+    # Optional composite score (weights are config-driven)
+    count_col = rename_map["bike_station_count"]
+    capacity_col = rename_map["bike_capacity_sum"]
+    distance_col = rename_map["bike_distance_mean_m"]
+    weights = config.features.accessibility.bike
+    score_col = f"bike_accessibility_score_{suffix}"
+    features[score_col] = (
+        float(weights.bias)
+        + float(weights.w_station_count) * pd.to_numeric(features[count_col], errors="coerce").fillna(0.0)
+        + float(weights.w_capacity_sum) * pd.to_numeric(features[capacity_col], errors="coerce").fillna(0.0)
+        + float(weights.w_distance_mean_m) * pd.to_numeric(features[distance_col], errors="coerce").fillna(0.0)
+    )
+
     # POI features (optional)
     if poi is not None and not poi.empty and config.features.poi is not None:
         poi_cfg = config.features.poi
@@ -137,11 +151,10 @@ def build_station_features(
             for cat in categories:
                 features[f"poi_count_{cat}_{int(radius_m)}m"] = 0
 
-        poi_categories = poi["category"].astype(str)
         poi_lat = poi["lat"].astype(float)
         poi_lon = poi["lon"].astype(float)
 
-        for idx, station in metro_stations.iterrows():
+        for _, station in metro_stations.iterrows():
             station_id = str(station["station_id"])
             lat0 = float(station["lat"])
             lon0 = float(station["lon"])
@@ -182,7 +195,105 @@ def build_station_features(
                     col = f"poi_count_{cat}_{int(radius_m)}m"
                     features.loc[features["station_id"] == station_id, col] = int(within_counts.get(cat, 0))
 
+    # Time-pattern features from bike rent proxy (optional)
+    if bike_timeseries is not None and not bike_timeseries.empty and not links.empty:
+        pattern = _build_time_pattern_features(
+            config=config,
+            bike_timeseries=bike_timeseries,
+            links=links,
+            suffix=suffix,
+        )
+        features = features.merge(pattern, on="station_id", how="left")
+
     return features
+
+
+def _build_time_pattern_features(
+    *,
+    config: AppConfig,
+    bike_timeseries: pd.DataFrame,
+    links: pd.DataFrame,
+    suffix: str,
+) -> pd.DataFrame:
+    ts = bike_timeseries.copy()
+    ts["station_id"] = ts["station_id"].astype(str)
+    ts["ts"] = pd.to_datetime(ts["ts"], utc=True, errors="coerce")
+    ts = ts.dropna(subset=["ts"])
+
+    if ts.empty:
+        return pd.DataFrame(columns=["station_id"])
+
+    if "rent_proxy" not in ts.columns or "return_proxy" not in ts.columns:
+        ts = compute_rent_return_proxy(
+            ts,
+            station_id_col="station_id",
+            ts_col="ts",
+            available_bikes_col="available_bikes",
+        )
+
+    end_ts = ts["ts"].max()
+    window_days = int(config.features.timeseries_window_days)
+    window_start = end_ts - pd.Timedelta(days=window_days)
+    ts = ts[ts["ts"] >= window_start].copy()
+
+    links_sorted = links.sort_values("distance_m").copy()
+    links_sorted["bike_station_id"] = links_sorted["bike_station_id"].astype(str)
+    primary = links_sorted.drop_duplicates(subset=["bike_station_id"], keep="first")[
+        ["bike_station_id", "metro_station_id"]
+    ].copy()
+    primary = primary.rename(columns={"bike_station_id": "station_id", "metro_station_id": "station_id_metro"})
+
+    joined = ts.merge(primary, on="station_id", how="inner")
+    if joined.empty:
+        return pd.DataFrame(columns=["station_id"])
+
+    local_ts = joined["ts"].dt.tz_convert(config.temporal.timezone)
+    joined["hour"] = local_ts.dt.hour.astype(int)
+    joined["weekday"] = local_ts.dt.weekday.astype(int)
+    joined["is_weekend"] = (joined["weekday"] >= 5).astype(int)
+
+    tp = config.features.time_patterns
+    joined["is_peak_am"] = (
+        (joined["hour"] >= int(tp.peak_am_start_hour)) & (joined["hour"] < int(tp.peak_am_end_hour))
+    ).astype(int)
+    joined["is_peak_pm"] = (
+        (joined["hour"] >= int(tp.peak_pm_start_hour)) & (joined["hour"] < int(tp.peak_pm_end_hour))
+    ).astype(int)
+
+    joined["rent_total"] = joined["rent_proxy"].astype(float)
+    joined["rent_weekend"] = joined["rent_proxy"].astype(float) * joined["is_weekend"].astype(float)
+    joined["rent_peak_am"] = joined["rent_proxy"].astype(float) * joined["is_peak_am"].astype(float)
+    joined["rent_peak_pm"] = joined["rent_proxy"].astype(float) * joined["is_peak_pm"].astype(float)
+
+    grouped = joined.groupby("station_id_metro", as_index=False).agg(
+        rent_total=("rent_total", "sum"),
+        rent_weekend=("rent_weekend", "sum"),
+        rent_peak_am=("rent_peak_am", "sum"),
+        rent_peak_pm=("rent_peak_pm", "sum"),
+    )
+    grouped = grouped.rename(columns={"station_id_metro": "station_id"})
+
+    total = grouped["rent_total"].replace({0.0: pd.NA})
+    grouped[f"bike_rent_proxy_total_{suffix}_{window_days}d"] = grouped["rent_total"]
+    grouped[f"bike_rent_proxy_weekend_share_{suffix}_{window_days}d"] = (
+        grouped["rent_weekend"] / total
+    )
+    grouped[f"bike_rent_proxy_peak_am_share_{suffix}_{window_days}d"] = (
+        grouped["rent_peak_am"] / total
+    )
+    grouped[f"bike_rent_proxy_peak_pm_share_{suffix}_{window_days}d"] = (
+        grouped["rent_peak_pm"] / total
+    )
+
+    return grouped[
+        [
+            "station_id",
+            f"bike_rent_proxy_total_{suffix}_{window_days}d",
+            f"bike_rent_proxy_weekend_share_{suffix}_{window_days}d",
+            f"bike_rent_proxy_peak_am_share_{suffix}_{window_days}d",
+            f"bike_rent_proxy_peak_pm_share_{suffix}_{window_days}d",
+        ]
+    ]
 
 
 def build_station_targets(
@@ -253,9 +364,9 @@ def build_feature_artifacts(
         metro_stations=metro_stations,
         bike_stations=bike_stations,
         links=links,
+        bike_timeseries=bike_timeseries,
         poi=poi,
         district_map=district_map,
     )
     station_targets = build_station_targets(config=config, bike_timeseries=bike_timeseries, links=links)
     return FeatureArtifacts(station_features=station_features, station_targets=station_targets)
-

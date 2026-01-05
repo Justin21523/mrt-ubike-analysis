@@ -5,12 +5,15 @@ from pathlib import Path
 import pandas as pd
 
 from metrobikeatlas.config.models import (
+    AccessibilitySettings,
     AnalyticsSettings,
     AppConfig,
     AppSettings,
+    BikeAccessibilityWeights,
     CacheSettings,
     ClusteringSettings,
     FeatureSettings,
+    FeatureTimePatternSettings,
     LoggingSettings,
     POISettings,
     SimilaritySettings,
@@ -46,6 +49,17 @@ def _test_config() -> AppConfig:
             station_targets_path=Path("data/gold/station_targets.csv"),
             timeseries_window_days=7,
             admin_boundaries_geojson_path=Path("data/external/admin_boundaries.geojson"),
+            time_patterns=FeatureTimePatternSettings(
+                peak_am_start_hour=7,
+                peak_am_end_hour=10,
+                peak_pm_start_hour=17,
+                peak_pm_end_hour=20,
+            ),
+            accessibility=AccessibilitySettings(
+                bike=BikeAccessibilityWeights(
+                    w_station_count=1.0, w_capacity_sum=0.02, w_distance_mean_m=-0.005, bias=0.0
+                )
+            ),
             poi=POISettings(
                 path=Path("data/external/poi.csv"),
                 radii_m=[300, 500],

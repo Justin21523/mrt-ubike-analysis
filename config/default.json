@@ -35,6 +35,20 @@
     "station_targets_path": "data/gold/station_targets.csv",
     "timeseries_window_days": 7,
     "admin_boundaries_geojson_path": "data/external/admin_boundaries.geojson",
+    "time_patterns": {
+      "peak_am_start_hour": 7,
+      "peak_am_end_hour": 10,
+      "peak_pm_start_hour": 17,
+      "peak_pm_end_hour": 20
+    },
+    "accessibility": {
+      "bike": {
+        "w_station_count": 1.0,
+        "w_capacity_sum": 0.02,
+        "w_distance_mean_m": -0.005,
+        "bias": 0.0
+      }
+    },
     "poi": {
       "path": "data/external/poi.csv",
       "radii_m": [300, 500],
