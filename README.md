@@ -9,7 +9,7 @@ shared bike stations, and city factors (district/POI density, accessibility, etc
 - Reproducible project scaffold (config, logging, caching)
 - TDX clients for metro + bike station metadata and bike availability snapshots
 - Preprocessing utilities: temporal alignment and metro↔bike spatial join
-- FastAPI backend + minimal map UI (click a metro station → metro & bike charts)
+- FastAPI backend + interactive map dashboard (control panels, inspector, keyboard shortcuts)
 
 ## Quickstart
 
@@ -18,6 +18,8 @@ shared bike stations, and city factors (district/POI density, accessibility, etc
 3. Run API + web (demo mode by default): `python scripts/run_api.py`
 
 The web UI is served at `http://127.0.0.1:8000/`.
+
+Tip: press `?` in the UI to see keyboard shortcuts (W/A/S/D pan, Q/E zoom, etc.).
 
 ## Demo mode vs real data mode
 
@@ -71,6 +73,24 @@ analytics summary (served from `/analytics/overview`).
 If `data/silver/metro_timeseries.csv` is not present, the API returns `metro_flow_proxy_from_bike_rent`
 computed from bike availability deltas near each metro station. Provide `metro_timeseries.csv` (columns:
 `station_id`, `ts`, `value`) to override the proxy with real ridership/flow (see `python scripts/import_metro_timeseries.py -h`).
+
+## Dashboard controls (MVP)
+
+- Spatial join: `buffer` radius (m) or `nearest` K bike stations
+- Temporal alignment: `15min` / `hour` / `day`, and a rolling window (days)
+- Similar stations: top-k, metric, and standardization
+- Map layers: nearby bikes, buffer circle, link lines
+- Live refresh: auto re-fetch station data at an interval
+
+All UI settings persist in browser localStorage.
+
+## API runtime parameters (selected)
+
+- `GET /config`: default config values used by the web UI
+- `GET /bike_stations`: bike station metadata (for overlays)
+- `GET /station/{id}/timeseries`: supports `join_method`, `radius_m`, `nearest_k`, `granularity`, `window_days`
+- `GET /station/{id}/nearby_bike`: supports `join_method`, `radius_m`, `nearest_k`, `limit`
+- `GET /station/{id}/similar`: supports `top_k`, `metric`, `standardize`
 
 ## Environment variables (optional)
 
