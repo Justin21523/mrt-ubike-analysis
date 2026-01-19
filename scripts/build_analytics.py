@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 import argparse
 import logging
-from pathlib import Path
+import json
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -61,7 +70,29 @@ def main() -> None:
     kmeans.labels.to_csv(cluster_path, index=False)
     logger.info("Wrote %s", cluster_path)
 
+    # Reproducibility meta (ties analytics outputs back to Silver build id/hash + features meta).
+    repo_root = Path(__file__).resolve().parents[1]
+    silver_meta_path = repo_root / "data" / "silver" / "_build_meta.json"
+    try:
+        silver_meta = json.loads(silver_meta_path.read_text(encoding="utf-8")) if silver_meta_path.exists() else None
+    except Exception:
+        silver_meta = None
+    run_meta = {
+        "type": "gold_run_meta",
+        "stage": "analytics",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "silver_build_id": (silver_meta or {}).get("build_id") if isinstance(silver_meta, dict) else None,
+        "silver_inputs_hash": (silver_meta or {}).get("inputs_hash") if isinstance(silver_meta, dict) else None,
+        "inputs": {"target_metric": args.target_metric},
+        "artifacts": {
+            "feature_correlations": str(corr_path),
+            "regression_coefficients": str(reg_path),
+            "station_clusters": str(cluster_path),
+        },
+    }
+    (out_dir / "_run_meta.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("Wrote %s", out_dir / "_run_meta.json")
+
 
 if __name__ == "__main__":
     main()
-

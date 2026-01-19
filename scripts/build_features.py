@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-import argparse
-import logging
+import sys
 from pathlib import Path
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
+import argparse
+import logging
+
 import pandas as pd
+import json
+from datetime import datetime, timezone
 
 from metrobikeatlas.config.loader import load_config
 from metrobikeatlas.features.builder import (
@@ -67,6 +76,29 @@ def main() -> None:
     config.features.station_targets_path.parent.mkdir(parents=True, exist_ok=True)
     artifacts.station_targets.to_csv(config.features.station_targets_path, index=False)
     logger.info("Wrote %s", config.features.station_targets_path)
+
+    # Reproducibility meta (ties Gold outputs back to Silver build id/hash).
+    try:
+        silver_meta_path = silver_dir / "_build_meta.json"
+        silver_meta = json.loads(silver_meta_path.read_text(encoding="utf-8")) if silver_meta_path.exists() else None
+    except Exception:
+        silver_meta = None
+    run_meta = {
+        "type": "gold_run_meta",
+        "stage": "features",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "silver_build_id": (silver_meta or {}).get("build_id") if isinstance(silver_meta, dict) else None,
+        "silver_inputs_hash": (silver_meta or {}).get("inputs_hash") if isinstance(silver_meta, dict) else None,
+        "inputs": {"silver_dir": str(silver_dir)},
+        "artifacts": {
+            "station_features_path": str(config.features.station_features_path),
+            "station_targets_path": str(config.features.station_targets_path),
+        },
+    }
+    out_dir = config.features.station_features_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "_run_meta.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("Wrote %s", out_dir / "_run_meta.json")
 
 
 if __name__ == "__main__":

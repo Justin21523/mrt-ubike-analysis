@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 import argparse
 import logging
-from pathlib import Path
 
 from metrobikeatlas.config.loader import load_config
 from metrobikeatlas.quality.silver import validate_silver_dir
@@ -31,4 +38,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

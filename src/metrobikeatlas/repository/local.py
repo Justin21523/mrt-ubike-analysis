@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+import os
 import pandas as pd
+import sqlite3
 
 from metrobikeatlas.analytics.similarity import find_similar_stations
 from metrobikeatlas.config.models import AppConfig
@@ -36,7 +38,23 @@ class LocalRepository:
         self._metro_stations = self._read_required_csv("metro_stations.csv")
         self._bike_stations = self._read_required_csv("bike_stations.csv")
         self._links = self._read_required_csv("metro_bike_links.csv")
-        self._bike_ts = self._read_required_csv("bike_timeseries.csv", parse_dates=["ts"])
+        self._bike_ts_parts_dir = self._silver_dir / "bike_timeseries_parts"
+        self._lazy_bike_ts = str(os.getenv("METROBIKEATLAS_LAZY_BIKE_TS", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self._sqlite_path = self._silver_dir / "metrobikeatlas.db"
+        self._use_sqlite = str(os.getenv("METROBIKEATLAS_STORAGE", "")).strip().lower() == "sqlite" and self._sqlite_path.exists()
+        if not self._lazy_bike_ts:
+            self._bike_ts = self._read_required_csv("bike_timeseries.csv", parse_dates=["ts"])
+        else:
+            # In lazy mode, allow either partitioned files or the monolithic CSV.
+            bike_ts_csv = self._silver_dir / "bike_timeseries.csv"
+            if not self._bike_ts_parts_dir.exists() and not bike_ts_csv.exists():
+                raise FileNotFoundError(f"Missing required file: {bike_ts_csv}")
+            self._bike_ts = None
         self._metro_ts = self._read_optional_csv("metro_timeseries.csv", parse_dates=["ts"])
 
         self._station_features = self._read_optional_path(config.features.station_features_path)
@@ -49,6 +67,77 @@ class LocalRepository:
         self._regression_coefficients = self._read_optional_path(
             config.features.station_features_path.parent / "regression_coefficients.csv"
         )
+
+    def _read_bike_ts_lazy(self, *, bike_ids: set[str], window_days: int | None) -> pd.DataFrame:
+        """
+        Read bike time series in a scalable way for long-running deployments.
+
+        If `data/silver/bike_timeseries_parts/YYYY-MM-DD.csv` exists, we read only the most recent days.
+        Otherwise we fall back to reading the full `bike_timeseries.csv`.
+        """
+
+        if self._use_sqlite:
+            return self._read_bike_ts_sqlite(bike_ids=bike_ids, window_days=window_days)
+
+        if self._bike_ts_parts_dir.exists():
+            files = sorted(self._bike_ts_parts_dir.glob("*.csv"))
+            if not files:
+                return pd.DataFrame(columns=["station_id", "ts"])
+            if window_days is not None:
+                use = files[-max(int(window_days) + 1, 1) :]
+            else:
+                use = files
+            frames = []
+            for f in use:
+                try:
+                    df = pd.read_csv(f, parse_dates=["ts"])
+                except Exception:
+                    continue
+                if "station_id" in df.columns:
+                    df["station_id"] = df["station_id"].astype(str)
+                    df = df[df["station_id"].astype(str).isin(bike_ids)].copy()
+                frames.append(df)
+            if not frames:
+                return pd.DataFrame(columns=["station_id", "ts"])
+            out = pd.concat(frames, ignore_index=True)
+            out["ts"] = pd.to_datetime(out["ts"], utc=True, errors="coerce")
+            return out
+
+        # Fallback: monolithic CSV
+        df = self._read_required_csv("bike_timeseries.csv", parse_dates=["ts"])
+        df["station_id"] = df["station_id"].astype(str)
+        return df[df["station_id"].astype(str).isin(bike_ids)].copy()
+
+    def _read_bike_ts_sqlite(self, *, bike_ids: set[str], window_days: int | None) -> pd.DataFrame:
+        if not bike_ids:
+            return pd.DataFrame(columns=["station_id", "ts"])
+        conn = sqlite3.connect(str(self._sqlite_path))
+        try:
+            # Find end ts for this selection.
+            q_marks = ",".join(["?"] * len(bike_ids))
+            cur = conn.cursor()
+            cur.execute(f"SELECT MAX(ts) FROM bike_timeseries WHERE station_id IN ({q_marks})", tuple(bike_ids))
+            row = cur.fetchone()
+            end_ts = row[0] if row else None
+            where_time = ""
+            params = list(bike_ids)
+            if end_ts and window_days is not None:
+                # Use lexical comparison on ISO strings (works for fixed format).
+                cur.execute("SELECT datetime(?, ?)", (end_ts, f"-{int(window_days)} days"))
+                start_row = cur.fetchone()
+                start_ts = start_row[0] if start_row else None
+                if start_ts:
+                    where_time = " AND ts >= ?"
+                    params.append(start_ts)
+            sql = f"SELECT station_id, ts, city, available_bikes, available_docks, rent_proxy, return_proxy FROM bike_timeseries WHERE station_id IN ({q_marks}){where_time}"
+            df = pd.read_sql_query(sql, conn, params=params)
+        finally:
+            conn.close()
+        if df.empty:
+            return df
+        df["station_id"] = df["station_id"].astype(str)
+        df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+        return df.dropna(subset=["ts"]).copy()
 
     def list_metro_stations(self) -> list[dict[str, Any]]:
         cols = ["station_id", "name", "lat", "lon", "city", "system"]
@@ -70,7 +159,10 @@ class LocalRepository:
         else:
             df["cluster"] = None
 
-        return df.to_dict(orient="records")
+        out = df.to_dict(orient="records")
+        for row in out:
+            row["source"] = "silver"
+        return out
 
     def list_bike_stations(self) -> list[dict[str, Any]]:
         cols = ["station_id", "name", "lat", "lon", "city", "operator", "capacity"]
@@ -141,7 +233,10 @@ class LocalRepository:
         gran, tz = self._resolve_temporal(granularity=granularity, timezone=timezone)
         window_days_value = None if window_days is None else max(int(window_days), 1)
 
-        bike_df = self._bike_ts[self._bike_ts["station_id"].astype(str).isin(bike_ids)].copy()
+        if self._lazy_bike_ts:
+            bike_df = self._read_bike_ts_lazy(bike_ids=bike_ids, window_days=window_days_value)
+        else:
+            bike_df = self._bike_ts[self._bike_ts["station_id"].astype(str).isin(bike_ids)].copy()
         if window_days_value is not None and not bike_df.empty:
             bike_df["ts"] = pd.to_datetime(bike_df["ts"], utc=True, errors="coerce")
             end_ts = bike_df["ts"].max()
@@ -498,6 +593,205 @@ class LocalRepository:
             },
             "clusters": cluster_counts,
         }
+
+    def metro_bike_availability_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        if self._lazy_bike_ts:
+            # Prefer partitioned files: read a small suffix of files to get a recent index.
+            if self._bike_ts_parts_dir.exists():
+                files = sorted(self._bike_ts_parts_dir.glob("*.csv"))[-7:]  # last week
+                stamps = []
+                for f in files:
+                    try:
+                        df = pd.read_csv(f, usecols=["ts"])
+                    except Exception:
+                        continue
+                    t = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+                    stamps.extend([x for x in t.dropna().unique()])
+                stamps = sorted(set(stamps))[-max(int(limit), 1) :]
+                return [{"ts": pd.to_datetime(t, utc=True).to_pydatetime()} for t in stamps]
+            # SQLite fallback: ask for global distinct ts (bounded).
+            if self._use_sqlite:
+                conn = sqlite3.connect(str(self._sqlite_path))
+                try:
+                    rows = conn.execute(
+                        "SELECT DISTINCT ts FROM bike_timeseries ORDER BY ts DESC LIMIT ?",
+                        (max(int(limit), 1),),
+                    ).fetchall()
+                finally:
+                    conn.close()
+                stamps = [pd.to_datetime(r[0], utc=True, errors="coerce") for r in rows if r and r[0]]
+                stamps = [t for t in stamps if pd.notna(t)]
+                stamps = list(reversed(stamps))
+                return [{"ts": t.to_pydatetime()} for t in stamps]
+            return []
+
+        df = self._bike_ts.copy()
+        if df.empty or "ts" not in df.columns:
+            return []
+        df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+        df = df.dropna(subset=["ts"])
+        if df.empty:
+            return []
+        timestamps = sorted(df["ts"].unique())
+        timestamps = timestamps[-max(int(limit), 1) :]
+        return [{"ts": t.to_pydatetime()} for t in timestamps]
+
+    def metro_bike_availability_at(self, ts: str) -> list[dict[str, Any]]:
+        if self._lazy_bike_ts:
+            # Read only the relevant day partition when available.
+            target = pd.to_datetime(ts, utc=True, errors="coerce")
+            if pd.isna(target):
+                raise ValueError(f"Invalid ts: {ts}")
+            if self._bike_ts_parts_dir.exists():
+                day = target.strftime("%Y-%m-%d")
+                f = self._bike_ts_parts_dir / f"{day}.csv"
+                if f.exists():
+                    df = pd.read_csv(f, parse_dates=["ts"])
+                else:
+                    return []
+            elif self._use_sqlite:
+                conn = sqlite3.connect(str(self._sqlite_path))
+                try:
+                    rows = conn.execute(
+                        "SELECT station_id, ts, available_bikes FROM bike_timeseries WHERE ts = ?",
+                        (target.strftime("%Y-%m-%dT%H:%M:%S%z"),),
+                    ).fetchall()
+                finally:
+                    conn.close()
+                df = pd.DataFrame(rows, columns=["station_id", "ts", "available_bikes"])
+            else:
+                return []
+        else:
+            df = self._bike_ts.copy()
+        if df.empty:
+            return []
+        df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+        target = pd.to_datetime(ts, utc=True, errors="coerce")
+        if pd.isna(target):
+            raise ValueError(f"Invalid ts: {ts}")
+
+        at = df[df["ts"] == target].copy()
+        if at.empty:
+            return []
+        if "station_id" not in at.columns or "available_bikes" not in at.columns:
+            return []
+
+        at["station_id"] = at["station_id"].astype(str)
+        links = self._links.copy()
+        links["metro_station_id"] = links["metro_station_id"].astype(str)
+        links["bike_station_id"] = links["bike_station_id"].astype(str)
+
+        merged = links.merge(at, left_on="bike_station_id", right_on="station_id", how="left")
+        merged["available_bikes"] = pd.to_numeric(merged["available_bikes"], errors="coerce").fillna(0.0)
+        agg = merged.groupby("metro_station_id", as_index=False)["available_bikes"].sum()
+
+        return [
+            {
+                "station_id": str(row["metro_station_id"]),
+                "ts": target.to_pydatetime(),
+                "available_bikes_total": float(row["available_bikes"]),
+            }
+            for _, row in agg.iterrows()
+        ]
+
+    def metro_heat_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        # Heat timestamp index is shared across metrics because all metrics come from `bike_timeseries.csv`.
+        return self.metro_bike_availability_index(limit=limit)
+
+    def metro_heat_at(self, ts: str, *, metric: str = "available", agg: str = "sum") -> list[dict[str, Any]]:
+        if self._lazy_bike_ts:
+            target = pd.to_datetime(ts, utc=True, errors="coerce")
+            if pd.isna(target):
+                raise ValueError(f"Invalid ts: {ts}")
+            if self._bike_ts_parts_dir.exists():
+                day = target.strftime("%Y-%m-%d")
+                f = self._bike_ts_parts_dir / f"{day}.csv"
+                if not f.exists():
+                    return []
+                df = pd.read_csv(f, parse_dates=["ts"])
+            elif self._use_sqlite:
+                metric_key = str(metric).strip().lower()
+                metric_col = {
+                    "available": "available_bikes",
+                    "rent_proxy": "rent_proxy",
+                    "return_proxy": "return_proxy",
+                }.get(metric_key)
+                if metric_col is None:
+                    raise ValueError(f"Unsupported metric: {metric}")
+                conn = sqlite3.connect(str(self._sqlite_path))
+                try:
+                    rows = conn.execute(
+                        f"SELECT station_id, ts, {metric_col} FROM bike_timeseries WHERE ts = ?",
+                        (target.strftime("%Y-%m-%dT%H:%M:%S%z"),),
+                    ).fetchall()
+                finally:
+                    conn.close()
+                df = pd.DataFrame(rows, columns=["station_id", "ts", metric_col])
+            else:
+                return []
+        else:
+            df = self._bike_ts.copy()
+        if df.empty:
+            return []
+
+        metric_key = str(metric).strip().lower()
+        metric_col = {
+            "available": "available_bikes",
+            "rent_proxy": "rent_proxy",
+            "return_proxy": "return_proxy",
+        }.get(metric_key)
+        if metric_col is None:
+            raise ValueError(f"Unsupported metric: {metric}")
+
+        # Ensure proxy columns exist when requested.
+        if metric_col in {"rent_proxy", "return_proxy"} and (
+            metric_col not in df.columns or "rent_proxy" not in df.columns or "return_proxy" not in df.columns
+        ):
+            df = compute_rent_return_proxy(
+                df,
+                station_id_col="station_id",
+                ts_col="ts",
+                available_bikes_col="available_bikes",
+            )
+            self._bike_ts = df
+
+        df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+        target = pd.to_datetime(ts, utc=True, errors="coerce")
+        if pd.isna(target):
+            raise ValueError(f"Invalid ts: {ts}")
+
+        at = df[df["ts"] == target].copy()
+        if at.empty:
+            return []
+        if "station_id" not in at.columns or metric_col not in at.columns:
+            return []
+
+        at["station_id"] = at["station_id"].astype(str)
+        links = self._links.copy()
+        links["metro_station_id"] = links["metro_station_id"].astype(str)
+        links["bike_station_id"] = links["bike_station_id"].astype(str)
+
+        merged = links.merge(at, left_on="bike_station_id", right_on="station_id", how="left")
+        merged[metric_col] = pd.to_numeric(merged[metric_col], errors="coerce").fillna(0.0)
+
+        agg_key = str(agg).strip().lower()
+        if agg_key == "sum":
+            grouped = merged.groupby("metro_station_id", as_index=False)[metric_col].sum()
+        elif agg_key == "mean":
+            grouped = merged.groupby("metro_station_id", as_index=False)[metric_col].mean()
+        else:
+            raise ValueError(f"Unsupported agg: {agg}")
+
+        return [
+            {
+                "station_id": str(row["metro_station_id"]),
+                "ts": target.to_pydatetime(),
+                "metric": metric_key,
+                "agg": agg_key,
+                "value": float(row[metric_col]),
+            }
+            for _, row in grouped.iterrows()
+        ]
 
     def _read_required_csv(self, filename: str, **kwargs) -> pd.DataFrame:
         path = self._silver_dir / filename
