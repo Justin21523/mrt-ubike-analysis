@@ -251,6 +251,38 @@ def _read_collector_heartbeat(repo_root: Path) -> dict[str, object] | None:
         return None
 
 
+def _collector_running_from_heartbeat(
+    heartbeat: dict[str, object] | None,
+    *,
+    now: datetime,
+    default_stale_seconds: float = 900.0,
+) -> bool:
+    if not isinstance(heartbeat, dict):
+        return False
+    ts = heartbeat.get("ts_utc")
+    if not ts:
+        return False
+    try:
+        hb_ts = datetime.fromisoformat(str(ts)).astimezone(timezone.utc)
+    except Exception:
+        return False
+    age_s = max((now - hb_ts).total_seconds(), 0.0)
+
+    interval_s = heartbeat.get("availability_interval_s")
+    try:
+        interval_f = float(interval_s) if interval_s is not None else None
+    except Exception:
+        interval_f = None
+
+    if interval_f is None or interval_f <= 0:
+        return age_s <= float(default_stale_seconds)
+
+    # Consider the collector "running" if it has written a heartbeat within ~2 intervals (plus slack).
+    # This avoids false negatives for conservative collection intervals (e.g. 10 minutes).
+    stale_s = max(2.0 * interval_f + 60.0, 180.0)
+    return age_s <= stale_s
+
+
 def _read_silver_build_meta(repo_root: Path) -> dict[str, object] | None:
     path = repo_root / "data" / "silver" / "_build_meta.json"
     if not path.exists():
@@ -824,6 +856,8 @@ def get_status(service: StationService = Depends(get_service), response: Respons
     silver_build_meta = _read_silver_build_meta(repo_root)
 
     alerts: list[AlertOut] = []
+    now = datetime.now(timezone.utc)
+    collector_running_from_hb = _collector_running_from_heartbeat(heartbeat, now=now)
 
     required_silver = [
         silver_dir / "metro_stations.csv",
@@ -845,7 +879,7 @@ def get_status(service: StationService = Depends(get_service), response: Respons
             )
         )
 
-    if collector is not None and collector.pid is not None and not collector.running:
+    if collector is not None and collector.pid is not None and not collector.running and not collector_running_from_hb:
         alerts.append(
             AlertOut(
                 level="warning",
@@ -857,13 +891,13 @@ def get_status(service: StationService = Depends(get_service), response: Respons
             )
         )
 
-    if collector is not None and collector.running:
+    if (collector is not None and collector.running) or collector_running_from_hb:
         if heartbeat is None:
             alerts.append(
                 AlertOut(
                     level="critical",
                     title="Collector heartbeat missing",
-                    message="Collector is running but heartbeat file is missing. Collector may be outdated or stuck.",
+                    message="Collector seems active but heartbeat file is missing. Collector may be outdated or stuck.",
                     commands=[
                         "python scripts/run_api.py  # open Data page to restart collector",
                         "python scripts/restart_collector_if_stale.py --force",
@@ -873,7 +907,7 @@ def get_status(service: StationService = Depends(get_service), response: Respons
         else:
             try:
                 hb_ts = datetime.fromisoformat(str(heartbeat.get("ts_utc"))).astimezone(timezone.utc)
-                age_s = max((datetime.now(timezone.utc) - hb_ts).total_seconds(), 0.0)
+                age_s = max((now - hb_ts).total_seconds(), 0.0)
                 if age_s > 900:
                     alerts.append(
                         AlertOut(
@@ -929,7 +963,7 @@ def get_status(service: StationService = Depends(get_service), response: Respons
                 )
             )
 
-    now = datetime.now(timezone.utc)
+    # `now` is defined earlier (used by heartbeat-derived collector status)
     def _age_seconds(ts: datetime | None) -> float | None:
         if ts is None:
             return None
@@ -958,9 +992,11 @@ def get_status(service: StationService = Depends(get_service), response: Respons
             )
         )
 
+    collector_running_effective = (collector.running if collector is not None else False) or collector_running_from_hb
+
     health = {
-        "collector_running": collector.running if collector is not None else False,
-        "collector_pid": collector.pid if collector is not None else None,
+        "collector_running": bool(collector_running_effective),
+        "collector_pid": collector.pid if (collector is not None and collector.running) else None,
         "bronze_bike_availability_last_utc": None if bronze_avail_latest is None else bronze_avail_latest.mtime_utc,
         "bronze_bike_availability_age_s": None
         if bronze_avail_latest is None

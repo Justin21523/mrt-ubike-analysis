@@ -719,6 +719,12 @@ def main() -> None:
                 {
                     "ts_utc": datetime.now(timezone.utc).isoformat(),
                     "loop_started_utc": loop_started.isoformat(),
+                    "availability_interval_s": int(interval_s),
+                    "jitter_s": float(jitter_s),
+                    "stations_refresh_interval_hours": float(args.stations_refresh_interval_hours),
+                    "build_silver_interval_s": None
+                    if args.build_silver_interval_seconds is None
+                    else int(args.build_silver_interval_seconds),
                     "last_success_utc": last_success_utc,
                     "last_error_utc": last_error_utc,
                     "last_error": last_error,
