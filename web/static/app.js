@@ -698,6 +698,45 @@ function renderExternalMetroPanel(payload, { onValidate, onUpload, onBuild } = {
   root.querySelector("#btnExternalBuild").addEventListener("click", () => onBuild?.());
 }
 
+function renderExternalCsvPanel(rootId, payload, { onValidate, onUpload, onBuild, onDownload } = {}) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  const ok = Boolean(payload?.ok);
+  const issues = payload?.issues ?? [];
+  const head = payload?.head ?? [];
+
+  root.innerHTML = `
+    <div class="status-kv">
+      <div class="label">Path</div>
+      <div class="mono">${payload?.path ?? "—"}</div>
+    </div>
+    <div class="status-kv">
+      <div class="label">Rows</div>
+      <div class="mono">${payload?.row_count ?? 0} ${ok ? "· ok" : "· not ok"}</div>
+    </div>
+    <div class="row row-actions">
+      <button class="btn" data-action="validate">Validate</button>
+      <input class="input" data-action="file" type="file" accept=".csv,text/csv" />
+      <button class="btn" data-action="upload">Upload</button>
+      <button class="btn" data-action="build" ${ok ? "" : "disabled"}>Build Silver</button>
+      <button class="btn" data-action="download">Download</button>
+    </div>
+    <div class="hint">Localhost-only: upload/validate is disabled when opened remotely.</div>
+    <div class="hint mono">${issues.map((i) => `${i.level}: ${i.message}`).join("\n") || ""}</div>
+    <pre class="log-tail mono">${head.length ? JSON.stringify(head, null, 2) : "—"}</pre>
+  `;
+
+  root.querySelector('[data-action="validate"]').addEventListener("click", () => onValidate?.());
+  root.querySelector('[data-action="upload"]').addEventListener("click", () => {
+    const input = root.querySelector('[data-action="file"]');
+    const file = input?.files?.[0] ?? null;
+    if (!file) return alert("Pick a CSV file first.");
+    onUpload?.(file);
+  });
+  root.querySelector('[data-action="build"]').addEventListener("click", () => onBuild?.());
+  root.querySelector('[data-action="download"]').addEventListener("click", () => onDownload?.());
+}
+
 function setRequestMetaText(text) {
   const el = document.getElementById("requestMeta");
   if (!el) return;
@@ -1191,6 +1230,42 @@ function generatePolicyCards({ status, station, timeseries, heatByStation }) {
     });
   }
 
+  const holidayEff = timeseries?.meta?.holiday_effect ?? null;
+  if (holidayEff?.pct != null) {
+    const pct = safeNum(holidayEff.pct);
+    if (pct != null && Math.abs(pct) >= 0.1) {
+      cards.push({
+        title: "假日效應：需求型態不同（調度/引導可拆分）",
+        impact: "假日/平日分流調度，避免用同一套策略誤判",
+        beneficiaries: "週末旅遊族群、商圈活動周邊使用者",
+        risk: "需要 calendar 資料維護；活動日可能比假日更敏感",
+        needs: "calendar.csv（假日標記）＋至少 2 週序列",
+        actions: [
+          { label: "Open Evidence", primary: true, type: "story_step", step: "evidence" },
+          { label: "Build Silver", type: "admin", action: "build_silver" },
+        ],
+      });
+    }
+  }
+
+  const rainEff = timeseries?.meta?.rain_effect ?? null;
+  if (rainEff?.pct != null) {
+    const pct = safeNum(rainEff.pct);
+    if (pct != null && Math.abs(pct) >= 0.1) {
+      cards.push({
+        title: "天候效應：雨天需求變化（備援供給/導引）",
+        impact: "雨天預先部署或轉乘導引，提高服務韌性",
+        beneficiaries: "通勤族、轉乘旅客",
+        risk: "天候資料需穩定；區域降雨差異大",
+        needs: "weather_hourly.csv（雨量）＋門檻與對照分析",
+        actions: [
+          { label: "Heat: rent_proxy", primary: true, type: "set_heat", metric: "rent_proxy", agg: "sum" },
+          { label: "Open Explorer", type: "nav", view: "explorer" },
+        ],
+      });
+    }
+  }
+
   const heatVals = Array.from((heatByStation ?? new Map()).values());
   const q90 = quantile(heatVals, 0.9);
   const q10 = quantile(heatVals, 0.1);
@@ -1443,8 +1518,32 @@ function renderBriefing(status, state, { onboarding } = {}) {
   }
 
   const alerts = (status?.alerts ?? []).slice(0, 3);
+  const effects = [];
+  if (ts?.meta?.holiday_effect?.pct != null) {
+    const pct = Number(ts.meta.holiday_effect.pct);
+    if (Number.isFinite(pct)) {
+      effects.push({
+        level: Math.abs(pct) >= 0.2 ? "warning" : "info",
+        title: "假日效應",
+        message: `假日平均 ${Math.round(pct * 100)}%（n=${ts.meta.holiday_effect.n_holiday}/${ts.meta.holiday_effect.n_non_holiday}）`,
+        commands: [],
+      });
+    }
+  }
+  if (ts?.meta?.rain_effect?.pct != null) {
+    const pct = Number(ts.meta.rain_effect.pct);
+    if (Number.isFinite(pct)) {
+      effects.push({
+        level: Math.abs(pct) >= 0.2 ? "warning" : "info",
+        title: "雨天效應",
+        message: `雨天平均 ${Math.round(pct * 100)}%（city=${ts.meta.rain_effect.city} threshold=${ts.meta.rain_effect.precip_threshold_mm}mm）`,
+        commands: [],
+      });
+    }
+  }
+  const allCallouts = [...effects, ...alerts].slice(0, 3);
   calloutsEl.innerHTML = "";
-  for (const a of alerts) {
+  for (const a of allCallouts) {
     const div = document.createElement("div");
     const level = (a.level || "info").toLowerCase();
     div.className = `briefing-callout ${level}`;
@@ -1864,6 +1963,8 @@ async function main() {
       // These panels are localhost-only; ignore failures when opened remotely.
       refreshJobs({ quiet: true }).catch(() => {});
       refreshExternalMetro({ quiet: true }).catch(() => {});
+      refreshExternalCalendar({ quiet: true }).catch(() => {});
+      refreshExternalWeather({ quiet: true }).catch(() => {});
       // Narrative insights for Home page
       refreshHotspots({ quiet: true }).catch(() => {});
       if (onboarding.shouldAutoOpen()) {
@@ -2025,6 +2126,138 @@ async function main() {
       if (!quiet) setStatusText("External CSV validated");
     } catch (e) {
       const root = document.getElementById("externalMetro");
+      if (root) root.innerHTML = `<div class="hint">External CSV endpoints are localhost-only (${e.message})</div>`;
+    }
+  }
+
+  async function refreshExternalCalendar({ quiet = false } = {}) {
+    try {
+      const payload = await adminFetchJson("/external/calendar/preview?limit=30");
+      renderExternalCsvPanel(
+        "externalCalendar",
+        {
+          ok: payload.ok,
+          path: payload.path,
+          row_count: payload.row_count,
+          issues: payload.issues,
+          head: payload.rows?.slice?.(0, 5) ?? [],
+        },
+        {
+          onValidate: () => refreshExternalCalendar({ quiet: false }),
+          onBuild: () => document.getElementById("btnBuildSilver").click(),
+          onDownload: () => window.open("/external/calendar/download", "_blank"),
+          onUpload: async (file) => {
+            setOverlayVisible(true, "Uploading calendar CSV…");
+            try {
+              const form = new FormData();
+              form.append("file", file);
+              const res = await adminFetch("/external/calendar/upload", { method: "POST", body: form });
+              const json = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(json?.issues?.[0]?.message || `HTTP ${res.status}`);
+              setStatusText("Calendar CSV uploaded");
+            } catch (e) {
+              setStatusText(`Upload failed: ${e.message}`);
+            } finally {
+              setOverlayVisible(false);
+              await refreshExternalCalendar({ quiet: true });
+              try {
+                const preview = await adminFetchJson("/external/calendar/preview?limit=5");
+                if (preview?.ok) {
+                  const plan = await adminPostJson("/admin/build_silver_async?dry_run=1", null);
+                  const overwrites = (plan?.meta?.would_overwrite ?? [])
+                    .filter((a) => a?.exists)
+                    .map((a) => a.path)
+                    .slice(0, 8);
+                  const msg =
+                    `Calendar CSV looks OK.\n\n` +
+                    (overwrites.length ? `May overwrite:\n${overwrites.join("\n")}\n\n` : "") +
+                    "Start async Silver build now?";
+                  if (confirm(msg)) {
+                    setOverlayVisible(true, "Starting Silver build…");
+                    await adminPostJson("/admin/build_silver_async", null);
+                    await refreshJobs({ quiet: true });
+                    await refreshStatus({ quiet: true });
+                    setStatusText("Silver build job started");
+                  }
+                }
+              } catch {
+                // ignore
+              } finally {
+                setOverlayVisible(false);
+              }
+            }
+          },
+        }
+      );
+      if (!quiet) setStatusText("External calendar validated");
+    } catch (e) {
+      const root = document.getElementById("externalCalendar");
+      if (root) root.innerHTML = `<div class="hint">External CSV endpoints are localhost-only (${e.message})</div>`;
+    }
+  }
+
+  async function refreshExternalWeather({ quiet = false } = {}) {
+    try {
+      const payload = await adminFetchJson("/external/weather_hourly/preview?limit=30");
+      renderExternalCsvPanel(
+        "externalWeather",
+        {
+          ok: payload.ok,
+          path: payload.path,
+          row_count: payload.row_count,
+          issues: payload.issues,
+          head: payload.rows?.slice?.(0, 5) ?? [],
+        },
+        {
+          onValidate: () => refreshExternalWeather({ quiet: false }),
+          onBuild: () => document.getElementById("btnBuildSilver").click(),
+          onDownload: () => window.open("/external/weather_hourly/download", "_blank"),
+          onUpload: async (file) => {
+            setOverlayVisible(true, "Uploading weather CSV…");
+            try {
+              const form = new FormData();
+              form.append("file", file);
+              const res = await adminFetch("/external/weather_hourly/upload", { method: "POST", body: form });
+              const json = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(json?.issues?.[0]?.message || `HTTP ${res.status}`);
+              setStatusText("Weather CSV uploaded");
+            } catch (e) {
+              setStatusText(`Upload failed: ${e.message}`);
+            } finally {
+              setOverlayVisible(false);
+              await refreshExternalWeather({ quiet: true });
+              try {
+                const preview = await adminFetchJson("/external/weather_hourly/preview?limit=5");
+                if (preview?.ok) {
+                  const plan = await adminPostJson("/admin/build_silver_async?dry_run=1", null);
+                  const overwrites = (plan?.meta?.would_overwrite ?? [])
+                    .filter((a) => a?.exists)
+                    .map((a) => a.path)
+                    .slice(0, 8);
+                  const msg =
+                    `Weather CSV looks OK.\n\n` +
+                    (overwrites.length ? `May overwrite:\n${overwrites.join("\n")}\n\n` : "") +
+                    "Start async Silver build now?";
+                  if (confirm(msg)) {
+                    setOverlayVisible(true, "Starting Silver build…");
+                    await adminPostJson("/admin/build_silver_async", null);
+                    await refreshJobs({ quiet: true });
+                    await refreshStatus({ quiet: true });
+                    setStatusText("Silver build job started");
+                  }
+                }
+              } catch {
+                // ignore
+              } finally {
+                setOverlayVisible(false);
+              }
+            }
+          },
+        }
+      );
+      if (!quiet) setStatusText("External weather validated");
+    } catch (e) {
+      const root = document.getElementById("externalWeather");
       if (root) root.innerHTML = `<div class="hint">External CSV endpoints are localhost-only (${e.message})</div>`;
     }
   }
