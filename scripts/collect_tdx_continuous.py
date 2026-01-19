@@ -65,16 +65,101 @@ def _is_pid_running(pid: int) -> bool:
     return True
 
 
+def _pid_cmdline(pid: int) -> str | None:
+    try:
+        data = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except Exception:
+        return None
+    try:
+        return data.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+    except Exception:
+        return None
+
+
+def _pid_start_time_ticks(pid: int) -> int | None:
+    # Linux only: /proc/<pid>/stat field 22 is process starttime (clock ticks since boot).
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    try:
+        parts = stat.split()
+        if len(parts) < 22:
+            return None
+        return int(parts[21])
+    except Exception:
+        return None
+
+
+def _pid_looks_like_this_collector(pid: int) -> bool:
+    cmd = _pid_cmdline(pid)
+    if not cmd:
+        return False
+    return "collect_tdx_continuous.py" in cmd
+
+
+def _read_lock(lock_path: Path) -> dict[str, object] | None:
+    if not lock_path.exists():
+        return None
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    # Backwards compatibility: older lock format was just a PID integer.
+    try:
+        return {"pid": int(raw)}
+    except Exception:
+        return None
+
+
+def _write_lock(lock_path: Path, pid: int) -> None:
+    payload: dict[str, object] = {
+        "pid": int(pid),
+        "start_time_ticks": _pid_start_time_ticks(pid),
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "cmdline": _pid_cmdline(pid),
+    }
+    lock_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _acquire_lock(lock_path: Path) -> None:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if lock_path.exists():
+        lock = _read_lock(lock_path) or {}
+        existing = lock.get("pid")
         try:
-            existing = int(lock_path.read_text(encoding="utf-8").strip())
+            existing_pid = int(existing) if existing is not None else None
         except Exception:
-            existing = None
-        if existing and _is_pid_running(existing):
-            raise RuntimeError(f"Collector already running (lock pid={existing})")
-    lock_path.write_text(str(os.getpid()), encoding="utf-8")
+            existing_pid = None
+
+        # If a stale lock file happens to contain our current PID (PID reuse), do not self-deadlock.
+        if existing_pid == os.getpid():
+            _write_lock(lock_path, os.getpid())
+            return
+
+        if existing_pid and _is_pid_running(existing_pid):
+            # In Docker, PID reuse across container restarts can cause false positives if a lock file is persisted.
+            # Only treat it as "already running" if the PID is actually this collector script.
+            if _pid_looks_like_this_collector(existing_pid):
+                stored_start = lock.get("start_time_ticks")
+                live_start = _pid_start_time_ticks(existing_pid)
+                if stored_start is not None and live_start is not None:
+                    try:
+                        if int(stored_start) == int(live_start):
+                            raise RuntimeError(f"Collector already running (lock pid={existing_pid})")
+                    except Exception:
+                        pass
+                else:
+                    raise RuntimeError(f"Collector already running (lock pid={existing_pid})")
+    _write_lock(lock_path, os.getpid())
 
 
 def _release_lock(lock_path: Path) -> None:
