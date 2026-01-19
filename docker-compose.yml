@@ -45,10 +45,13 @@ services:
       - TDX_REQUEST_JITTER_S=0.2
       - TDX_SKIP_METRO_STATIONS=true
       - BUILD_SILVER_WRITE_SQLITE=true
-      - BRONZE_RETAIN_AVAIL_FILES_PER_CITY=288
-      - BRONZE_RETAIN_AVAIL_DAYS=2
-      - BRONZE_RETAIN_STATIONS_FILES_PER_CITY=4
-      - BRONZE_CLEANUP_INTERVAL_SECONDS=600
+      # Keep a short rolling window of raw Bronze JSON (older data is archived by `scheduler`).
+      - BRONZE_RETAIN_AVAIL_FILES_PER_CITY=${BRONZE_RETAIN_AVAIL_FILES_PER_CITY:-500}
+      - BRONZE_RETAIN_AVAIL_DAYS=${BRONZE_RETAIN_AVAIL_DAYS:-3}
+      - BRONZE_RETAIN_STATIONS_FILES_PER_CITY=${BRONZE_RETAIN_STATIONS_FILES_PER_CITY:-30}
+      - BRONZE_CLEANUP_INTERVAL_SECONDS=${BRONZE_CLEANUP_INTERVAL_SECONDS:-600}
+      # Disk safety (tune based on your machine). When disk is low, collector enters cleanup-only mode.
+      - MIN_FREE_DISK_BYTES=${MIN_FREE_DISK_BYTES:-2147483648}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -96,7 +99,11 @@ services:
       - SCHEDULER_DQ_INTERVAL_SECONDS=1800
       - SCHEDULER_GOLD_INTERVAL_SECONDS=1800
       - SCHEDULER_ARCHIVE_INTERVAL_SECONDS=86400
-      - ARCHIVE_BRONZE_OLDER_THAN_DAYS=30
+      # Archive Bronze daily: keep long history in tar.gz; delete old JSON after archiving.
+      - ARCHIVE_BRONZE_OLDER_THAN_DAYS=${ARCHIVE_BRONZE_OLDER_THAN_DAYS:-3}
+      - ARCHIVE_DELETE_AFTER=${ARCHIVE_DELETE_AFTER:-true}
+      - ARCHIVE_MIN_FREE_DISK_BYTES=${ARCHIVE_MIN_FREE_DISK_BYTES:-2147483648}
+      - ARCHIVE_MAX_BYTES=${ARCHIVE_MAX_BYTES:-0}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

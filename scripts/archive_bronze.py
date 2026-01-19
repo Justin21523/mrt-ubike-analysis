@@ -11,6 +11,7 @@ sys.path.insert(0, str(SRC_PATH))
 import argparse
 from datetime import datetime, timedelta, timezone
 import logging
+import shutil
 import tarfile
 
 from metrobikeatlas.config.loader import load_config
@@ -59,6 +60,72 @@ def _archive_files(
     return 0
 
 
+def _dir_size_bytes(root: Path) -> int:
+    if not root.exists():
+        return 0
+    total = 0
+    for p in root.rglob("*"):
+        try:
+            if p.is_file():
+                total += int(p.stat().st_size)
+        except Exception:
+            continue
+    return int(total)
+
+
+def _disk_free_bytes(path: Path) -> int:
+    try:
+        usage = shutil.disk_usage(str(path))
+        return int(usage.free)
+    except Exception:
+        return 0
+
+
+def _prune_archives(
+    *,
+    archive_dir: Path,
+    min_free_disk_bytes: int | None,
+    max_archive_bytes: int | None,
+) -> int:
+    if not archive_dir.exists():
+        return 0
+
+    min_free = int(min_free_disk_bytes or 0)
+    max_bytes = int(max_archive_bytes or 0)
+    if min_free <= 0 and max_bytes <= 0:
+        return 0
+
+    deleted = 0
+    archives = []
+    for p in archive_dir.rglob("*.tar.gz"):
+        try:
+            st = p.stat()
+            archives.append((float(st.st_mtime), int(st.st_size), p))
+        except Exception:
+            continue
+    archives.sort(key=lambda t: t[0])  # oldest first
+
+    while archives:
+        free_ok = True
+        size_ok = True
+        if min_free > 0:
+            free_ok = _disk_free_bytes(archive_dir) >= min_free
+        if max_bytes > 0:
+            size_ok = _dir_size_bytes(archive_dir) <= max_bytes
+        if free_ok and size_ok:
+            break
+
+        _, _, p = archives.pop(0)
+        try:
+            p.unlink()
+            deleted += 1
+            logger.warning("Pruned archive due to limits: %s", p)
+        except Exception:
+            continue
+
+    return deleted
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Archive old Bronze JSON files into tar.gz bundles (optional long-run ops).")
     p.add_argument("--bronze-dir", default="data/bronze")
@@ -70,6 +137,18 @@ def main() -> None:
         help="Comma-separated dataset roots under bronze-dir (e.g. tdx/bike/availability,tdx/bike/stations).",
     )
     p.add_argument("--delete-after-archive", action="store_true", help="Delete archived JSON files after bundling.")
+    p.add_argument(
+        "--min-free-disk-bytes",
+        type=int,
+        default=0,
+        help="If set, prune oldest archives until free disk is above this threshold.",
+    )
+    p.add_argument(
+        "--max-archive-bytes",
+        type=int,
+        default=0,
+        help="If set, prune oldest archives until total archive size is below this threshold.",
+    )
     args = p.parse_args()
 
     config = load_config()
@@ -86,6 +165,7 @@ def main() -> None:
     total_candidates = 0
     total_deleted = 0
     total_archives = 0
+    total_pruned = 0
 
     for root in dataset_roots:
         ds_dir = bronze_dir / root
@@ -126,15 +206,21 @@ def main() -> None:
                 total_deleted += deleted
                 logger.info("Archived %s files to %s (deleted=%s)", len(group), out, deleted)
 
+    total_pruned = _prune_archives(
+        archive_dir=archive_dir,
+        min_free_disk_bytes=(int(args.min_free_disk_bytes) or None),
+        max_archive_bytes=(int(args.max_archive_bytes) or None),
+    )
+
     logger.info(
-        "done: candidates=%s archives=%s deleted=%s (delete_after_archive=%s)",
+        "done: candidates=%s archives=%s deleted=%s pruned=%s (delete_after_archive=%s)",
         total_candidates,
         total_archives,
         total_deleted,
+        int(total_pruned),
         bool(args.delete_after_archive),
     )
 
 
 if __name__ == "__main__":
     main()
-

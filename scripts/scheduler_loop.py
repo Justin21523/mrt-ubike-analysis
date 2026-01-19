@@ -25,6 +25,17 @@ from metrobikeatlas.utils.logging import configure_logging
 logger = logging.getLogger(__name__)
 
 
+def _parse_bool(val: object | None, *, default: bool = False) -> bool:
+    if val is None:
+        return bool(default)
+    s = str(val).strip().lower()
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -158,6 +169,13 @@ def main() -> int:
     p.add_argument("--gold-interval-seconds", type=int, default=int(os.getenv("SCHEDULER_GOLD_INTERVAL_SECONDS", "1800")))
     p.add_argument("--archive-interval-seconds", type=int, default=int(os.getenv("SCHEDULER_ARCHIVE_INTERVAL_SECONDS", "86400")))
     p.add_argument("--archive-older-than-days", type=int, default=int(os.getenv("ARCHIVE_BRONZE_OLDER_THAN_DAYS", "30")))
+    p.add_argument(
+        "--archive-delete-after",
+        action=argparse.BooleanOptionalAction,
+        default=_parse_bool(os.getenv("ARCHIVE_DELETE_AFTER"), default=True),
+    )
+    p.add_argument("--archive-min-free-disk-bytes", type=int, default=int(os.getenv("ARCHIVE_MIN_FREE_DISK_BYTES", "0")) or 0)
+    p.add_argument("--archive-max-bytes", type=int, default=int(os.getenv("ARCHIVE_MAX_BYTES", "0")) or 0)
     args = p.parse_args()
 
     cfg = load_config()
@@ -295,22 +313,25 @@ def main() -> int:
 
             # Archive old Bronze snapshots (safe default: no delete).
             if _should_run_interval(state.last_archive_utc, every_s=int(args.archive_interval_seconds)):
-                rc, out = _run(
-                    [
-                        sys.executable,
-                        "scripts/archive_bronze.py",
-                        "--bronze-dir",
-                        "data/bronze",
-                        "--archive-dir",
-                        "data/archive/bronze",
-                        "--older-than-days",
-                        str(int(args.archive_older_than_days)),
-                        "--datasets",
-                        "tdx/bike/availability,tdx/bike/stations",
-                    ],
-                    cwd=repo_root,
-                    timeout_s=300.0,
-                )
+                cmd = [
+                    sys.executable,
+                    "scripts/archive_bronze.py",
+                    "--bronze-dir",
+                    "data/bronze",
+                    "--archive-dir",
+                    "data/archive/bronze",
+                    "--older-than-days",
+                    str(int(args.archive_older_than_days)),
+                    "--datasets",
+                    "tdx/bike/availability,tdx/bike/stations",
+                ]
+                if bool(args.archive_delete_after):
+                    cmd.append("--delete-after-archive")
+                if int(args.archive_min_free_disk_bytes) > 0:
+                    cmd += ["--min-free-disk-bytes", str(int(args.archive_min_free_disk_bytes))]
+                if int(args.archive_max_bytes) > 0:
+                    cmd += ["--max-archive-bytes", str(int(args.archive_max_bytes))]
+                rc, out = _run(cmd, cwd=repo_root, timeout_s=300.0)
                 state.last_archive_utc = now.isoformat()
                 last_action = f"archive_bronze rc={rc}"
                 last_error = None if rc == 0 else "archive_failed"

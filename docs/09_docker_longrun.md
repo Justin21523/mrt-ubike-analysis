@@ -26,14 +26,21 @@ Recommended (conservative throttling):
 
 Recommended (retention):
 
-- `BRONZE_RETAIN_AVAIL_FILES_PER_CITY=288`
-- `BRONZE_RETAIN_AVAIL_DAYS=2`
-- `BRONZE_RETAIN_STATIONS_FILES_PER_CITY=4`
+- `BRONZE_RETAIN_AVAIL_FILES_PER_CITY=500`
+- `BRONZE_RETAIN_AVAIL_DAYS=3`
+- `BRONZE_RETAIN_STATIONS_FILES_PER_CITY=30`
 - `BRONZE_CLEANUP_INTERVAL_SECONDS=600`
 
 Optional (disk safety):
 
-- `MIN_FREE_DISK_BYTES=10737418240` (10GB)
+- `MIN_FREE_DISK_BYTES=2147483648` (2GiB; tune based on your machine)
+
+Recommended (archive for long history):
+
+- `ARCHIVE_BRONZE_OLDER_THAN_DAYS=3`
+- `ARCHIVE_DELETE_AFTER=true` (keeps long history in `data/archive/bronze/` while bounding `data/bronze/`)
+- `ARCHIVE_MIN_FREE_DISK_BYTES=2147483648` (2GiB; prune oldest archives if free disk is low)
+- `ARCHIVE_MAX_BYTES=0` (optional cap; 0 disables)
 
 ## 2) Start
 
@@ -61,11 +68,19 @@ Collector health summary (exit code suitable for healthcheck):
 docker compose exec collector python scripts/collector_status.py --repo-root /app
 ```
 
+Scheduler health summary:
+
+```bash
+docker compose exec scheduler python scripts/scheduler_status.py --repo-root /app
+```
+
 ## 4) Where data goes
 
 - Bronze snapshots: `data/bronze/`
+- Bronze archives: `data/archive/bronze/`
 - Silver artifacts: `data/silver/`
 - Heartbeat/metrics: `logs/collector_heartbeat.json`, `logs/collector_metrics.json`
+- Scheduler heartbeat/state: `logs/scheduler_heartbeat.json`, `logs/scheduler_state.json`
 - Jobs/logs: `logs/jobs/`
 
 ## 5) Autostart at boot (host systemd)
