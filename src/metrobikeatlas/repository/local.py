@@ -56,6 +56,8 @@ class LocalRepository:
                 raise FileNotFoundError(f"Missing required file: {bike_ts_csv}")
             self._bike_ts = None
         self._metro_ts = self._read_optional_csv("metro_timeseries.csv", parse_dates=["ts"])
+        self._calendar = self._read_optional_csv("calendar.csv")
+        self._weather_hourly = self._read_optional_csv("weather_hourly.csv", parse_dates=["ts"])
 
         self._station_features = self._read_optional_path(config.features.station_features_path)
         self._station_clusters = self._read_optional_path(
@@ -255,6 +257,7 @@ class LocalRepository:
         bike_rent_points: list[dict[str, Any]] = []
         bike_return_points: list[dict[str, Any]] = []
         metro_proxy_points: list[dict[str, Any]] = []
+        meta: dict[str, Any] = {}
 
         if not bike_df.empty:
             bike_available = align_timeseries(
@@ -305,6 +308,86 @@ class LocalRepository:
             ]
 
             metro_proxy_points = bike_rent_points
+
+            # Context overlays (optional): calendar + weather.
+            try:
+                station_row = self._metro_stations[self._metro_stations["station_id"].astype(str) == str(metro_station_id)]
+                station_city = None
+                if not station_row.empty and "city" in station_row.columns:
+                    station_city = str(station_row.iloc[0].get("city") or "").strip() or None
+            except Exception:
+                station_city = None
+
+            # Holiday effect (joins by local date in the selected timezone).
+            if self._calendar is not None and not self._calendar.empty and not bike_rent.empty:
+                cal = self._calendar.copy()
+                if "date" in cal.columns:
+                    cal["date"] = cal["date"].astype(str)
+                if "is_holiday" in cal.columns:
+                    cal["is_holiday"] = pd.to_numeric(cal["is_holiday"], errors="coerce").fillna(0).astype(int)
+
+                tmp = bike_rent.copy()
+                tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True, errors="coerce")
+                tmp = tmp.dropna(subset=["ts"])
+                tmp["local_date"] = tmp["ts"].dt.tz_convert(tz).dt.strftime("%Y-%m-%d")
+                tmp = tmp.merge(cal[["date", "is_holiday"]], how="left", left_on="local_date", right_on="date")
+                tmp["is_holiday"] = tmp["is_holiday"].fillna(0).astype(int)
+
+                hol = tmp[tmp["is_holiday"] == 1]["rent_proxy"]
+                non = tmp[tmp["is_holiday"] == 0]["rent_proxy"]
+                if len(hol) and len(non):
+                    hol_mean = float(hol.mean())
+                    non_mean = float(non.mean())
+                    meta["holiday_effect"] = {
+                        "holiday_mean": hol_mean,
+                        "non_holiday_mean": non_mean,
+                        "delta": hol_mean - non_mean,
+                        "pct": None if non_mean == 0 else (hol_mean - non_mean) / non_mean,
+                        "n_holiday": int(len(hol)),
+                        "n_non_holiday": int(len(non)),
+                    }
+
+            # Rain effect (joins by UTC hour + city, using precip_mm threshold).
+            if (
+                station_city is not None
+                and self._weather_hourly is not None
+                and not self._weather_hourly.empty
+                and not bike_rent.empty
+                and {"ts", "city", "precip_mm"} <= set(self._weather_hourly.columns)
+            ):
+                w = self._weather_hourly.copy()
+                w["city"] = w["city"].astype(str)
+                w = w[w["city"] == station_city].copy()
+                if not w.empty:
+                    w["ts"] = pd.to_datetime(w["ts"], utc=True, errors="coerce")
+                    w = w.dropna(subset=["ts"])
+                    w["ts_hour_utc"] = w["ts"].dt.floor("h")
+                    w["precip_mm"] = pd.to_numeric(w["precip_mm"], errors="coerce")
+                    w = w.dropna(subset=["precip_mm"])
+
+                    tmp = bike_rent.copy()
+                    tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True, errors="coerce")
+                    tmp = tmp.dropna(subset=["ts"])
+                    tmp["ts_hour_utc"] = tmp["ts"].dt.floor("h")
+                    tmp = tmp.merge(w[["ts_hour_utc", "precip_mm"]], how="left", on="ts_hour_utc")
+                    tmp = tmp.dropna(subset=["precip_mm"])
+                    precip_threshold = 0.1
+                    tmp["is_rain"] = (tmp["precip_mm"] >= precip_threshold).astype(int)
+                    rain = tmp[tmp["is_rain"] == 1]["rent_proxy"]
+                    dry = tmp[tmp["is_rain"] == 0]["rent_proxy"]
+                    if len(rain) and len(dry):
+                        rain_mean = float(rain.mean())
+                        dry_mean = float(dry.mean())
+                        meta["rain_effect"] = {
+                            "rain_mean": rain_mean,
+                            "dry_mean": dry_mean,
+                            "delta": rain_mean - dry_mean,
+                            "pct": None if dry_mean == 0 else (rain_mean - dry_mean) / dry_mean,
+                            "n_rain": int(len(rain)),
+                            "n_dry": int(len(dry)),
+                            "precip_threshold_mm": float(precip_threshold),
+                            "city": station_city,
+                        }
 
         metro_ridership_points: list[dict[str, Any]] = []
         if self._metro_ts is not None and not self._metro_ts.empty:
@@ -392,6 +475,7 @@ class LocalRepository:
             "granularity": gran,
             "timezone": tz,
             "series": series,
+            "meta": meta,
         }
 
     def station_factors(self, metro_station_id: str) -> dict[str, Any]:
