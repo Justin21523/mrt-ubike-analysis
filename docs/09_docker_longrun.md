@@ -117,7 +117,7 @@ If you don't want to use systemd (or you don't have sudo), you can use user cron
 - start the compose stack at boot (`@reboot`)
 - run a watchdog every 2 minutes
 
-Install:
+Install (includes autostart + watchdog; optional: add DQ + archive lines too):
 
 ```bash
 chmod +x ops/cron/metrobikeatlas_cron.sh ops/watchdog/check_and_restart_collector.sh
@@ -126,6 +126,10 @@ rg -n \"metrobikeatlas_cron\" /tmp/mba.cron >/dev/null || cat >> /tmp/mba.cron <
 # MetroBikeAtlas (docker compose autostart + watchdog)
 @reboot /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh start /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_start.log 2>&1
 */2 * * * * /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh watchdog /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_watchdog.log 2>&1
+# MetroBikeAtlas: DQ gate (every 30 minutes)
+*/30 * * * * /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh dq /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_dq.log 2>&1
+# MetroBikeAtlas: archive old Bronze (monthly)
+15 3 1 * * /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh archive /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_archive.log 2>&1
 CRON
 sed -i \"s|/ABSOLUTE/PATH/TO/mrt-ubike-analysis|$PWD|g\" /tmp/mba.cron
 crontab /tmp/mba.cron
