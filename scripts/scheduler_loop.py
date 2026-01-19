@@ -234,10 +234,19 @@ def main() -> int:
                 state.last_silver_build_id = silver_build_id
                 state.last_silver_inputs_hash = silver_inputs_hash
 
-            want_gold = silver_build_id and (
-                silver_changed or _should_run_interval(state.last_gold_features_utc, every_s=int(args.gold_interval_seconds))
+            want_gold = bool(silver_build_id)
+            need_features = want_gold and (
+                silver_changed
+                or state.last_gold_features_utc is None
+                or _should_run_interval(state.last_gold_features_utc, every_s=int(args.gold_interval_seconds))
             )
-            if want_gold:
+            need_analytics = want_gold and (
+                silver_changed
+                or state.last_gold_analytics_utc is None
+                or _should_run_interval(state.last_gold_analytics_utc, every_s=int(args.gold_interval_seconds))
+            )
+
+            if need_features or need_analytics:
                 # Gate on Silver DQ first.
                 dq_rc, dq_out = _run(
                     [
@@ -258,30 +267,31 @@ def main() -> int:
                     last_error = "dq_silver_failed"
                     logger.warning("dq_silver failed rc=%s tail=%s", dq_rc, _tail(dq_out, max_lines=10))
                 else:
-                    # Build features (skips gracefully if external inputs missing; script logs warnings).
-                    rc, out = _run(
-                        [sys.executable, "scripts/build_features.py", "--silver-dir", "data/silver"],
-                        cwd=repo_root,
-                        timeout_s=300.0,
-                    )
-                    last_action = f"build_features rc={rc}"
-                    last_error = None if rc == 0 else "build_features_failed"
-                    if rc == 0:
-                        state.last_gold_features_utc = now.isoformat()
-                    else:
-                        logger.warning("build_features failed rc=%s tail=%s", rc, _tail(out, max_lines=10))
+                    if need_features:
+                        rc, out = _run(
+                            [sys.executable, "scripts/build_features.py", "--silver-dir", "data/silver"],
+                            cwd=repo_root,
+                            timeout_s=300.0,
+                        )
+                        last_action = f"build_features rc={rc}"
+                        last_error = None if rc == 0 else "build_features_failed"
+                        if rc == 0:
+                            state.last_gold_features_utc = now.isoformat()
+                        else:
+                            logger.warning("build_features failed rc=%s tail=%s", rc, _tail(out, max_lines=10))
 
-                    rc2, out2 = _run(
-                        [sys.executable, "scripts/build_analytics.py", "--silver-dir", "data/silver"],
-                        cwd=repo_root,
-                        timeout_s=300.0,
-                    )
-                    last_action = f"build_analytics rc={rc2}"
-                    last_error = None if rc2 == 0 else "build_analytics_failed"
-                    if rc2 == 0:
-                        state.last_gold_analytics_utc = now.isoformat()
-                    else:
-                        logger.warning("build_analytics failed rc=%s tail=%s", rc2, _tail(out2, max_lines=10))
+                    if need_analytics:
+                        rc2, out2 = _run(
+                            [sys.executable, "scripts/build_analytics.py"],
+                            cwd=repo_root,
+                            timeout_s=300.0,
+                        )
+                        last_action = f"build_analytics rc={rc2}"
+                        last_error = None if rc2 == 0 else "build_analytics_failed"
+                        if rc2 == 0:
+                            state.last_gold_analytics_utc = now.isoformat()
+                        else:
+                            logger.warning("build_analytics failed rc=%s tail=%s", rc2, _tail(out2, max_lines=10))
 
             # Archive old Bronze snapshots (safe default: no delete).
             if _should_run_interval(state.last_archive_utc, every_s=int(args.archive_interval_seconds)):
