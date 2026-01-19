@@ -110,7 +110,35 @@ systemctl list-timers --all | rg metrobikeatlas-watchdog
 journalctl -u metrobikeatlas-watchdog --no-pager -n 100
 ```
 
-## 7) Operational tips
+## 7) Alternative: user cron (no sudo)
+
+If you don't want to use systemd (or you don't have sudo), you can use user crontab to:
+
+- start the compose stack at boot (`@reboot`)
+- run a watchdog every 2 minutes
+
+Install:
+
+```bash
+chmod +x ops/cron/metrobikeatlas_cron.sh ops/watchdog/check_and_restart_collector.sh
+crontab -l > /tmp/mba.cron || true
+rg -n \"metrobikeatlas_cron\" /tmp/mba.cron >/dev/null || cat >> /tmp/mba.cron <<'CRON'
+# MetroBikeAtlas (docker compose autostart + watchdog)
+@reboot /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh start /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_start.log 2>&1
+*/2 * * * * /bin/bash /ABSOLUTE/PATH/TO/mrt-ubike-analysis/ops/cron/metrobikeatlas_cron.sh watchdog /ABSOLUTE/PATH/TO/mrt-ubike-analysis >> /ABSOLUTE/PATH/TO/mrt-ubike-analysis/logs/cron_watchdog.log 2>&1
+CRON
+sed -i \"s|/ABSOLUTE/PATH/TO/mrt-ubike-analysis|$PWD|g\" /tmp/mba.cron
+crontab /tmp/mba.cron
+```
+
+Verify:
+
+```bash
+crontab -l | rg metrobikeatlas
+tail -n 50 logs/cron_watchdog.log
+```
+
+## 8) Operational tips
 
 - Tune rate limiting: edit `.env` and `docker compose up -d` again.
 - If CSV grows large: run `python scripts/build_silver.py --write-sqlite` once and set:
