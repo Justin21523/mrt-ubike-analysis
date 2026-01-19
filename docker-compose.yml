@@ -124,3 +124,38 @@ services:
       interval: 30s
       timeout: 5s
       retries: 10
+
+  weather:
+    build: .
+    container_name: metrobikeatlas-weather
+    init: true
+    env_file:
+      - .env
+    environment:
+      - METROBIKEATLAS_DEMO_MODE=false
+      # Open-Meteo (no API key) -> writes `data/external/weather_hourly.csv`
+      - WEATHER_CITY=${WEATHER_CITY:-Taipei}
+      - WEATHER_LAT=${WEATHER_LAT:-25.0330}
+      - WEATHER_LON=${WEATHER_LON:-121.5654}
+      - WEATHER_INTERVAL_SECONDS=${WEATHER_INTERVAL_SECONDS:-1800}
+      - WEATHER_PAST_DAYS=${WEATHER_PAST_DAYS:-7}
+      - WEATHER_RETAIN_DAYS=${WEATHER_RETAIN_DAYS:-365}
+      - WEATHER_MIN_REQUEST_INTERVAL_S=${WEATHER_MIN_REQUEST_INTERVAL_S:-1.0}
+      - WEATHER_REQUEST_JITTER_S=${WEATHER_REQUEST_JITTER_S:-0.5}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    command: ["python", "scripts/collect_weather_open_meteo.py"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "scripts/weather_status.py", "--repo-root", "/app"]
+      interval: 60s
+      timeout: 5s
+      retries: 10
