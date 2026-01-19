@@ -20,8 +20,14 @@
           <div class="brand-subtitle" id="appSubtitle">MRT × Shared Bike × City Factors</div>
         </div>
         <div class="pill" id="modePill">Loading…</div>
+        <div class="pill" id="ssePill">Live: connecting…</div>
       </div>
       <div class="toolbar-center">
+        <div class="nav" role="tablist" aria-label="Pages">
+          <button class="btn nav-btn" id="btnNavHome" role="tab" aria-selected="false">Home</button>
+          <button class="btn nav-btn" id="btnNavExplorer" role="tab" aria-selected="true">Explorer</button>
+          <button class="btn nav-btn" id="btnNavData" role="tab" aria-selected="false">Data</button>
+        </div>
         <button class="btn" id="btnResetView" title="Reset view (R)">Reset</button>
         <button class="btn" id="btnToggleLeft" title="Toggle left panel">Left</button>
         <button class="btn" id="btnToggleRight" title="Toggle right panel">Right</button>
@@ -32,9 +38,75 @@
       </div>
     </header>
 
+    <div class="overlay hidden" id="loadingOverlay" aria-hidden="true">
+      <div class="overlay-card">
+        <div class="overlay-title">Working…</div>
+        <div class="overlay-subtitle" id="overlayText">Please wait</div>
+      </div>
+    </div>
+
     <main class="workspace" id="workspace">
       <aside class="sidebar left" id="leftPanel">
         <div class="sidebar-scroll">
+          <section class="briefing hidden" id="briefingPanel" aria-label="Briefing">
+            <div class="briefing-header">
+              <div>
+                <div class="briefing-kicker">Service Design · Public Policy Brief</div>
+                <div class="briefing-title">MetroBikeAtlas — 資料導向的捷運 × 共享單車分析</div>
+                <div class="briefing-subtitle" id="briefingSubtitle">以可解釋的指標，快速看懂站點供需與策略選項</div>
+              </div>
+              <div class="briefing-actions">
+                <button class="btn btn-primary" id="btnBriefingStartCollector">Start collector</button>
+                <button class="btn" id="btnBriefingBuildSilver">Build Silver</button>
+                <button class="btn" id="btnBriefingCopy">Copy brief</button>
+                <button class="btn" id="btnBriefingSave">Save snapshot</button>
+                <button class="btn" id="btnBriefingDownload">Download pack</button>
+              </div>
+            </div>
+
+            <div class="briefing-kpis" id="briefingKpis"></div>
+
+            <div class="briefing-stepper" id="briefingStepper" role="tablist" aria-label="Story steps"></div>
+            <div class="briefing-story">
+              <div class="briefing-story-main">
+                <div class="briefing-story-title" id="briefingStepTitle">Loading…</div>
+                <div class="briefing-story-conclusion" id="briefingStepConclusion"></div>
+                <div class="briefing-story-action" id="briefingStepAction"></div>
+              </div>
+              <div class="briefing-story-viz">
+                <div class="briefing-viz-title" id="briefingVizTitle">Evidence</div>
+                <div class="briefing-viz-wrap">
+                  <canvas id="briefingChart"></canvas>
+                </div>
+                <div class="briefing-viz-meta mono" id="briefingVizMeta"></div>
+              </div>
+            </div>
+
+            <div class="briefing-cards">
+              <div class="briefing-card">
+                <div class="briefing-card-title">Data readiness</div>
+                <div class="briefing-body" id="briefingReadiness">Loading…</div>
+              </div>
+              <div class="briefing-card">
+                <div class="briefing-card-title">Policy options</div>
+                <div class="briefing-body" id="briefingPolicyIntro">自動生成 2–4 個策略卡，幫你把數據翻成可執行選項。</div>
+                <div class="policy-cards" id="policyCards"></div>
+              </div>
+            </div>
+
+            <div class="briefing-callouts" id="briefingCallouts"></div>
+
+            <div class="briefing-card" id="briefingSnapshots">
+              <div class="briefing-card-title">Snapshots</div>
+              <div class="briefing-body">保存與重現同一張簡報（localhost-only）。</div>
+              <div class="row row-actions">
+                <select id="snapshotSelect" class="select"></select>
+                <button class="btn" id="btnSnapshotLoad">Load</button>
+                <button class="btn" id="btnSnapshotRefresh">Refresh</button>
+              </div>
+            </div>
+          </section>
+
           <div class="section-title">Stations</div>
           <div class="field">
             <label class="label" for="stationSearch">Search</label>
@@ -93,7 +165,7 @@
               </div>
             </div>
 
-            <details class="details nested" open>
+            <details class="details nested">
               <summary class="summary">Similarity</summary>
               <div class="grid2">
                 <div class="field">
@@ -121,6 +193,10 @@
                 <span>nearby bikes</span>
               </label>
               <label class="checkbox">
+                <input id="toggleHeat" type="checkbox" />
+                <span>bike availability heat</span>
+              </label>
+              <label class="checkbox">
                 <input id="toggleBuffer" type="checkbox" />
                 <span>buffer circle</span>
               </label>
@@ -128,9 +204,43 @@
                 <input id="toggleLinks" type="checkbox" />
                 <span>link lines</span>
               </label>
+
+              <div class="field" id="heatTimeField">
+                <label class="label" for="heatTimeRange">Heat time</label>
+                <input id="heatTimeRange" type="range" min="0" max="0" step="1" value="0" />
+                <div class="hint mono" id="heatTimeLabel">—</div>
+              </div>
+
+              <div class="grid2">
+                <div class="field">
+                  <label class="label" for="heatMetricSelect">Heat metric</label>
+                  <select id="heatMetricSelect" class="select">
+                    <option value="available">available</option>
+                    <option value="rent_proxy">rent_proxy</option>
+                    <option value="return_proxy">return_proxy</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="label" for="heatAggSelect">Heat agg</label>
+                  <select id="heatAggSelect" class="select">
+                    <option value="sum">sum</option>
+                    <option value="mean">mean</option>
+                  </select>
+                </div>
+              </div>
+
+              <label class="checkbox">
+                <input id="toggleHeatFollowLatest" type="checkbox" />
+                <span>follow latest heat timestamp</span>
+              </label>
+
+              <label class="checkbox">
+                <input id="toggleProblemStations" type="checkbox" />
+                <span>focus problem stations</span>
+              </label>
             </details>
 
-            <details class="details nested" open>
+            <details class="details nested">
               <summary class="summary">Live</summary>
               <label class="checkbox">
                 <input id="toggleLive" type="checkbox" />
@@ -154,6 +264,15 @@
 
       <section class="scene">
         <div id="map" class="map"></div>
+        <div class="map-legend hidden" id="heatLegend">
+          <div class="legend-title">Bike availability</div>
+          <div class="legend-bar" id="legendBar"></div>
+          <div class="legend-labels">
+            <span class="mono" id="legendMin">0</span>
+            <span class="mono" id="legendMax">0</span>
+          </div>
+          <div class="legend-meta mono" id="heatMeta"></div>
+        </div>
         <div class="scene-hud" id="sceneHud">
           <div class="hud-line" id="hudStation">No station selected</div>
           <div class="hud-line mono" id="hudParams"></div>
@@ -167,6 +286,13 @@
           <div class="inspector-header">
             <div id="stationName" class="inspector-title">Select a station</div>
             <div id="stationMeta" class="inspector-meta"></div>
+            <div class="row row-actions">
+              <button class="btn" id="btnCopyTimeseriesUrl">Copy timeseries URL</button>
+              <button class="btn" id="btnCopyNearbyUrl">Copy nearby URL</button>
+              <button class="btn" id="btnCopyDataMeta">Copy data meta</button>
+              <button class="btn" id="btnCopyPermalink">Copy permalink</button>
+            </div>
+            <div class="hint mono" id="requestMeta"></div>
           </div>
 
           <details class="details" open>
@@ -207,7 +333,7 @@
             <ul id="nearbyList" class="list"></ul>
           </details>
 
-          <details class="details" open>
+          <details class="details">
             <summary class="summary">Station Factors</summary>
             <div id="factorsHint" class="hint"></div>
             <div class="table-wrap">
@@ -224,15 +350,69 @@
             </div>
           </details>
 
-          <details class="details" open>
+          <details class="details">
             <summary class="summary">Similar Stations</summary>
             <ul id="similarList" class="list"></ul>
           </details>
 
-          <details class="details" open>
+          <details class="details">
             <summary class="summary">Analytics Overview</summary>
             <div id="overviewHint" class="hint"></div>
             <ul id="correlationList" class="list"></ul>
+          </details>
+
+          <details class="details" id="detailsDataStatus">
+            <summary class="summary">Data Status</summary>
+            <div class="row row-actions">
+              <button class="btn btn-primary" id="btnRefreshStatus">Refresh</button>
+              <button class="btn" id="btnStartCollector">Start collector</button>
+              <button class="btn" id="btnStopCollector">Stop collector</button>
+              <button class="btn" id="btnBuildSilver">Build Silver (async)</button>
+              <span class="hint mono" id="statusUpdatedAt"></span>
+            </div>
+
+            <div class="row row-actions">
+              <input class="input" id="adminTokenInput" type="password" placeholder="Admin token (optional)" />
+              <button class="btn" id="btnSaveAdminToken">Save token</button>
+              <button class="btn" id="btnClearAdminToken">Clear</button>
+            </div>
+
+            <div class="health-cards" id="healthCards"></div>
+
+            <div id="statusAlerts" class="status-alerts"></div>
+
+            <div class="status-block">
+              <div class="status-kv">
+                <div class="label">Mode</div>
+                <div class="mono" id="statusMode">—</div>
+              </div>
+              <div class="status-kv">
+                <div class="label">Bronze</div>
+                <div class="mono" id="statusBronzeDir">—</div>
+              </div>
+              <div class="status-kv">
+                <div class="label">Silver</div>
+                <div class="mono" id="statusSilverDir">—</div>
+              </div>
+            </div>
+
+            <div class="section-subtitle">Silver tables</div>
+            <div id="statusSilverTables" class="status-table" data-anchor="silver"></div>
+
+            <div class="section-subtitle">Bronze datasets</div>
+            <div id="statusBronzeDatasets" class="status-table" data-anchor="bronze"></div>
+
+            <div class="section-subtitle">Collector</div>
+            <div id="statusCollector" class="status-block"></div>
+
+            <div class="section-subtitle">Jobs</div>
+            <div id="jobCenter" class="status-block"></div>
+
+            <div class="section-subtitle">External metro stations CSV</div>
+            <div id="externalMetro" class="status-block"></div>
+
+            <div class="section-subtitle">Last Action</div>
+            <div id="adminResult" class="status-block"></div>
           </details>
         </div>
       </aside>
@@ -271,6 +451,19 @@
               <tr><td class="mono">Esc</td><td>Close help / cancel search</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="onboardingModal" role="dialog" aria-modal="true">
+      <div class="modal-backdrop" id="onboardingBackdrop"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">Real Data Setup</div>
+          <button class="btn" id="btnCloseOnboarding">Close</button>
+        </div>
+        <div class="modal-body">
+          <div id="onboardingBody"></div>
         </div>
       </div>
     </div>
