@@ -41,6 +41,12 @@ Optional (disk safety):
 docker compose up -d --build
 ```
 
+This starts 3 long-running services:
+
+- `api` (web + API)
+- `collector` (TDX Bronze collection + optional Silver rebuild)
+- `scheduler` (DQ gate + Gold rebuild + Bronze archiving)
+
 ## 3) Verify
 
 ```bash
@@ -116,6 +122,8 @@ If you don't want to use systemd (or you don't have sudo), you can use user cron
 
 - start the compose stack at boot (`@reboot`)
 - run a watchdog every 2 minutes
+
+Note: If you are already running the `scheduler` container, you do not need cron-based DQ/archive.
 
 Install (includes autostart + watchdog; optional: add DQ + archive lines too):
 

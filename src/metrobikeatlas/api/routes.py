@@ -2304,7 +2304,7 @@ def list_bike_stations(service: StationService = Depends(get_service)) -> list[B
 
 # Metro station metadata endpoint (used to render markers on the Leaflet map in the browser).
 @router.get("/stations", response_model=list[StationOut])
-def list_stations(service: StationService = Depends(get_service)) -> list[StationOut]:
+def list_stations(service: StationService = Depends(get_service), response: Response = None) -> list[StationOut]:  # type: ignore[assignment]
     # Fetch metro stations (optionally enriched with district/cluster if Gold tables are present).
     try:
         stations = service.list_stations()
@@ -2314,6 +2314,17 @@ def list_stations(service: StationService = Depends(get_service)) -> list[Statio
         if fallback is None:
             raise HTTPException(status_code=503, detail=str(e))
         stations = fallback
+    # Provide lightweight meta via headers without breaking the legacy response schema.
+    if response is not None:
+        meta = _meta_contract(service=service)
+        ext = meta.get("external") if isinstance(meta, dict) else None
+        if isinstance(ext, dict):
+            response.headers["X-MBA-Has-Calendar"] = "1" if ext.get("has_calendar") else "0"
+            response.headers["X-MBA-Has-Weather-Hourly"] = "1" if ext.get("has_weather_hourly") else "0"
+            response.headers["X-MBA-Has-SQLite"] = "1" if ext.get("has_sqlite") else "0"
+        bid = meta.get("silver_build_id") if isinstance(meta, dict) else None
+        if bid:
+            response.headers["X-MBA-Silver-Build-Id"] = str(bid)
     # Map internal dict keys to the public API field names expected by the frontend.
     return [
         StationOut(
