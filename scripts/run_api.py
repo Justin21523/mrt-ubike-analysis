@@ -2,9 +2,18 @@
 # This helps avoid import cycles and keeps startup lightweight (especially important in CLI scripts).
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 # We import `uvicorn` to run our FastAPI application as an ASGI server during local development.
 # In production you would typically run Uvicorn via a process manager (e.g., systemd, Docker, k8s).
 import uvicorn
+import os
 
 # We use a factory function so the FastAPI app can be created with a typed config (no global state).
 from metrobikeatlas.api.app import create_app
@@ -24,7 +33,22 @@ def main() -> None:
     app = create_app(config)
 
     # Start a local dev server on localhost; the static web UI is served by the same app.
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    host = os.getenv("METROBIKEATLAS_HOST", "127.0.0.1")
+    port = int(os.getenv("METROBIKEATLAS_PORT", "8000"))
+    proxy_headers = os.getenv("METROBIKEATLAS_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes", "on"}
+    forwarded_allow_ips = os.getenv("METROBIKEATLAS_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    timeout_keep_alive = int(os.getenv("METROBIKEATLAS_TIMEOUT_KEEP_ALIVE", "75"))
+    timeout_graceful_shutdown = int(os.getenv("METROBIKEATLAS_TIMEOUT_GRACEFUL_SHUTDOWN", "30"))
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        proxy_headers=proxy_headers,
+        forwarded_allow_ips=forwarded_allow_ips,
+        timeout_keep_alive=timeout_keep_alive,
+        timeout_graceful_shutdown=timeout_graceful_shutdown,
+    )
 
 
 if __name__ == "__main__":

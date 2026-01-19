@@ -1,0 +1,13 @@
+.venv
+.pytest_cache
+.ruff_cache
+.git
+data/bronze
+data/silver
+logs
+notebooks
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.swp

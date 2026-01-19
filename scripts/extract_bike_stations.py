@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 # `argparse` provides a stable CLI interface for production-style scripts (no interactive prompts).
 import argparse
 # We stamp each Bronze file with a timezone-aware UTC timestamp for traceability and reproducibility.
 from datetime import datetime, timezone
-# `Path` keeps filesystem operations cross-platform and avoids manual string joins.
-from pathlib import Path
+# `os.getenv` enables per-run tuning (rate limiting / caching) without changing code.
+import os
 
 # Config is loaded at runtime so we can change endpoints/cities without changing code (production-minded).
 from metrobikeatlas.config.loader import load_config
@@ -13,8 +21,32 @@ from metrobikeatlas.config.loader import load_config
 from metrobikeatlas.ingestion.bronze import write_bronze_json
 # `TDXClient` handles OAuth tokens and retries; `TDXCredentials` reads secrets from env (never from git).
 from metrobikeatlas.ingestion.tdx_base import TDXClient, TDXCredentials
+# Optional on-disk cache reduces API calls for mostly-static station metadata.
+from metrobikeatlas.utils.cache import JsonFileCache
 # Centralized logging configuration keeps script output consistent across local runs and production jobs.
 from metrobikeatlas.utils.logging import configure_logging
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return bool(default)
+    v = raw.strip().lower()
+    if v in {"1", "true", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
 # Keep all side effects (config IO, network calls, filesystem writes) inside `main()` so the module is import-safe.
@@ -34,6 +66,8 @@ def main() -> None:
     configure_logging(config.logging)
     # Read TDX credentials from environment variables (production practice: do not hardcode secrets).
     creds = TDXCredentials.from_env()
+    cache = JsonFileCache(config.cache)
+    use_cache = _env_bool("TDX_CACHE_STATIONS", True)
 
     # Ensure the Bronze root exists before writing any files.
     bronze_dir = Path(args.bronze_dir)
@@ -45,6 +79,8 @@ def main() -> None:
         base_url=config.tdx.base_url,
         token_url=config.tdx.token_url,
         credentials=creds,
+        min_request_interval_s=_env_float("TDX_MIN_REQUEST_INTERVAL_S", 0.2),
+        request_jitter_s=_env_float("TDX_REQUEST_JITTER_S", 0.05),
     ) as tdx:
         # Iterate configured bike cities; each city is written into its own partitioned Bronze path.
         for city in config.tdx.bike.cities:
@@ -54,8 +90,19 @@ def main() -> None:
             params = {"$format": "JSON"}
             # Capture retrieval time in UTC so we can compare files across machines/timezones.
             retrieved_at = datetime.now(timezone.utc)
-            # Fetch raw JSON payload; token/retry logic is handled inside `TDXClient`.
-            payload = tdx.get_json(path, params=params)
+            request_meta = {"path": path, "params": params, "cache": None}
+
+            # Station metadata changes slowly; reuse cached payloads to reduce API calls.
+            cache_key = cache.make_key("tdx:bike:stations", {"path": path, "params": params})
+            cached = cache.get(cache_key) if use_cache else None
+            if cached is not None:
+                payload = cached
+                request_meta["cache"] = "hit"
+            else:
+                payload = tdx.get_json_all(path, params=params, max_pages=int(os.getenv("TDX_MAX_PAGES", "100")))
+                if use_cache:
+                    cache.set(cache_key, payload)
+                request_meta["cache"] = "miss"
 
             # Persist the raw payload plus request metadata for full traceability (Bronze design principle).
             out = write_bronze_json(
@@ -65,7 +112,7 @@ def main() -> None:
                 dataset="stations",
                 city=city,
                 retrieved_at=retrieved_at,
-                request={"path": path, "params": params},
+                request=request_meta,
                 payload=payload,
             )
             # Print the output path so job logs show what was produced (useful for debugging pipelines).

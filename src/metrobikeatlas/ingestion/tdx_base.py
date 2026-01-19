@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 # `json.dumps` is used only for safe, truncated debug output in error messages.
 import json
+# `logging` is used to report rate limiting and paging behavior without leaking secrets.
+import logging
+# `random` is used for small jitter in client-side throttling (avoid synchronized bursts).
+import random
+# `time` provides monotonic clocks and sleeping for client-side throttling.
+import time
 # Typing helpers keep our interfaces explicit while we still operate on JSON dicts in the MVP.
 from typing import Any, Mapping, MutableMapping, Optional
 
@@ -15,6 +21,9 @@ import requests
 from requests.adapters import HTTPAdapter
 # `Retry` implements backoff for transient failures (rate limits, 5xx), without manual sleep loops.
 from urllib3.util.retry import Retry
+
+
+logger = logging.getLogger(__name__)
 
 
 # Custom exception for OAuth/token failures (credentials, token URL, malformed token response, etc.).
@@ -27,6 +36,53 @@ class TDXAuthError(RuntimeError):
 class TDXRequestError(RuntimeError):
     # Keeping this separate from `TDXAuthError` lets callers decide whether to retry or alert on auth issues.
     pass
+
+
+class TDXRateLimitError(TDXRequestError):
+    """
+    Raised when TDX returns 429 (rate limit).
+
+    `retry_after_s` is best-effort parsed from `Retry-After` header when present.
+    """
+
+    def __init__(self, message: str, *, retry_after_s: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
+
+
+class _RateLimiter:
+    """
+    Minimal client-side throttle.
+
+    This is complementary to urllib3's Retry/backoff:
+    - Retry/backoff handles transient errors (429/5xx) after they happen.
+    - This throttle reduces the chance we hit rate limits in the first place (especially during paging).
+    """
+
+    def __init__(
+        self,
+        *,
+        min_interval_s: float,
+        jitter_s: float,
+        now_fn=time.monotonic,
+        sleep_fn=time.sleep,
+    ) -> None:
+        self._min_interval_s = max(float(min_interval_s), 0.0)
+        self._jitter_s = max(float(jitter_s), 0.0)
+        self._now = now_fn
+        self._sleep = sleep_fn
+        self._next_allowed_at = 0.0
+
+    def wait(self) -> None:
+        if self._min_interval_s <= 0:
+            return
+        now = float(self._now())
+        remaining = self._next_allowed_at - now
+        if remaining > 0:
+            jitter = random.random() * self._jitter_s if self._jitter_s else 0.0
+            self._sleep(remaining + jitter)
+            now = float(self._now())
+        self._next_allowed_at = now + self._min_interval_s
 
 
 # `TDXCredentials` holds the client id/secret for the OAuth client-credentials flow.
@@ -84,6 +140,8 @@ class TDXClient:
         timeout_s: float = 30.0,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        min_request_interval_s: float = 0.0,
+        request_jitter_s: float = 0.0,
         user_agent: str = "metrobikeatlas/0.1.0",
     ) -> None:
         # Normalize `base_url` so later path joins are consistent (avoid double slashes).
@@ -96,6 +154,12 @@ class TDXClient:
         self._timeout_s = timeout_s
         # Token starts empty; it will be fetched lazily on the first request.
         self._token: Optional[_Token] = None
+
+        # Client-side throttle reduces the chance we hit rate limits during paging/bursty runs.
+        self._rate_limiter = _RateLimiter(
+            min_interval_s=min_request_interval_s,
+            jitter_s=request_jitter_s,
+        )
 
         # A `Session` reuses connections (keep-alive) which is both faster and friendlier to the API.
         self._session = requests.Session()
@@ -116,9 +180,17 @@ class TDXClient:
             status_forcelist=(429, 500, 502, 503, 504),
             # Limit retries to idempotent-ish methods we use here; avoid retrying unsafe methods implicitly.
             allowed_methods=("GET", "POST"),
+            # Respect `Retry-After` for 429/503 when present (common for rate limiting).
+            respect_retry_after_header=True,
             # Do not raise inside urllib3; we want to surface a single `TDXRequestError` with context.
             raise_on_status=False,
         )
+        # Cap backoff so a single request doesn't stall for an unbounded amount of time.
+        # Note: older urllib3 versions may not accept `backoff_max` in the constructor.
+        try:
+            retry.backoff_max = 60  # type: ignore[attr-defined]
+        except Exception:
+            pass
         # Mount the retry policy for both HTTPS and HTTP in case environments differ.
         self._session.mount("https://", HTTPAdapter(max_retries=retry))
         self._session.mount("http://", HTTPAdapter(max_retries=retry))
@@ -165,6 +237,9 @@ class TDXClient:
         return self._token.access_token
 
     def _build_url(self, path: str) -> str:
+        # Support absolute URLs (used for `@odata.nextLink` paging).
+        if path.startswith("https://") or path.startswith("http://"):
+            return path
         # Ensure callers can pass either "/path" or "path" without creating a double slash.
         path = path.lstrip("/")
         # Join base URL and path in a predictable way.
@@ -177,6 +252,8 @@ class TDXClient:
         params: Optional[Mapping[str, Any]] = None,
         headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
+        # Throttle before making the request (helps avoid 429s, especially when paging).
+        self._rate_limiter.wait()
         # Build the full URL early so we can include it in error messages.
         url = self._build_url(path)
         # Start from required headers: Authorization (bearer token) and Accept (JSON response expected).
@@ -201,11 +278,80 @@ class TDXClient:
 
         # Treat any 4xx/5xx as an error; callers can handle retries outside if needed.
         if resp.status_code >= 400:
+            if resp.status_code == 429:
+                retry_after_s: float | None = None
+                ra = resp.headers.get("Retry-After")
+                if ra:
+                    try:
+                        retry_after_s = float(ra)
+                    except Exception:
+                        retry_after_s = None
+                raise TDXRateLimitError(
+                    f"TDX request failed ({resp.status_code}) url={url} params={params} retry_after={ra} body={resp.text[:500]}",
+                    retry_after_s=retry_after_s,
+                )
             raise TDXRequestError(
                 f"TDX request failed ({resp.status_code}) url={url} params={params} body={resp.text[:500]}"
             )
         # Return parsed JSON; downstream code will map dicts into typed schema objects (Silver layer).
         return resp.json()
+
+    def get_json_all(
+        self,
+        path: str,
+        *,
+        params: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
+        max_pages: int = 100,
+    ) -> list[Any]:
+        """
+        Fetch all pages for endpoints that return OData-style responses.
+
+        Supported shapes:
+        - JSON list: returns as-is.
+        - OData dict: {"value": [...], "@odata.nextLink": "..."}: follows nextLink until exhausted.
+
+        This keeps Bronze payloads stable as a list, which simplifies Silver building.
+        """
+
+        if max_pages < 1:
+            raise ValueError("max_pages must be >= 1")
+
+        out: list[Any] = []
+        next_path: Optional[str] = path
+        next_params: Optional[Mapping[str, Any]] = params
+
+        page = 0
+        while next_path is not None:
+            page += 1
+            if page > max_pages:
+                raise TDXRequestError(f"Exceeded max_pages={max_pages} for path={path}")
+
+            data = self.get_json(next_path, params=next_params, headers=headers)
+            next_params = None  # nextLink already includes query params
+
+            if isinstance(data, list):
+                out.extend(data)
+                break
+            if isinstance(data, Mapping):
+                value = data.get("value")
+                if isinstance(value, list):
+                    out.extend(value)
+                else:
+                    raise TDXRequestError(f"Unexpected TDX response shape for path={path}: {json.dumps(data)[:200]}")
+
+                next_link = data.get("@odata.nextLink") or data.get("odata.nextLink")
+                if isinstance(next_link, str) and next_link.strip():
+                    next_path = next_link
+                    continue
+                next_path = None
+                break
+
+            raise TDXRequestError(f"Unexpected TDX response type for path={path}: {type(data).__name__}")
+
+        if page > 1:
+            logger.info("Fetched %s pages (%s records) for %s", page, len(out), path)
+        return out
 
     def close(self) -> None:
         # Close network resources; important for long-running scripts to avoid open connections.

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 # `argparse` provides a stable CLI interface for production-style scripts (no interactive prompts).
 import argparse
 # We stamp each Bronze file with a timezone-aware UTC timestamp for traceability and reproducibility.
 from datetime import datetime, timezone
-# `Path` keeps filesystem operations cross-platform and avoids manual string joins.
-from pathlib import Path
+# `os.getenv` enables per-run tuning (rate limiting) without changing code.
+import os
 
 # Config is loaded at runtime so we can change endpoints/cities without changing code (production-minded).
 from metrobikeatlas.config.loader import load_config
@@ -15,6 +23,16 @@ from metrobikeatlas.ingestion.bronze import write_bronze_json
 from metrobikeatlas.ingestion.tdx_base import TDXClient, TDXCredentials
 # Centralized logging configuration keeps script output consistent across local runs and production jobs.
 from metrobikeatlas.utils.logging import configure_logging
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
 
 
 # Keep all side effects (config IO, network calls, filesystem writes) inside `main()` so the module is import-safe.
@@ -45,6 +63,8 @@ def main() -> None:
         base_url=config.tdx.base_url,
         token_url=config.tdx.token_url,
         credentials=creds,
+        min_request_interval_s=_env_float("TDX_MIN_REQUEST_INTERVAL_S", 0.2),
+        request_jitter_s=_env_float("TDX_REQUEST_JITTER_S", 0.05),
     ) as tdx:
         # Iterate configured bike cities; each snapshot is partitioned by city in Bronze.
         for city in config.tdx.bike.cities:
@@ -54,8 +74,8 @@ def main() -> None:
             params = {"$format": "JSON"}
             # Capture retrieval time in UTC so we can align snapshots across cities and runs.
             retrieved_at = datetime.now(timezone.utc)
-            # Fetch raw JSON payload; token/retry logic is handled inside `TDXClient`.
-            payload = tdx.get_json(path, params=params)
+            # Fetch JSON payload (handles OData paging when needed, but usually returns a single list).
+            payload = tdx.get_json_all(path, params=params, max_pages=int(os.getenv("TDX_MAX_PAGES", "100")))
 
             # Persist the raw payload plus request metadata so we can build a time series later (Silver).
             out = write_bronze_json(

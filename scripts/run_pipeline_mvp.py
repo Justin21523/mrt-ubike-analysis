@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 # `argparse` provides a stable CLI interface for orchestrating an end-to-end pipeline (repeatable runs).
 import argparse
 # `logging` is used to report which sub-commands run and to surface progress/errors in job logs.
@@ -9,9 +17,6 @@ import os
 # `subprocess` runs the underlying scripts as separate processes to keep concerns separated.
 import subprocess
 # `sys.executable` ensures we invoke sub-scripts with the same Python interpreter/venv.
-import sys
-# `Path` keeps filesystem operations cross-platform and avoids manual string joins.
-from pathlib import Path
 # `Optional` makes small helper functions explicit about "may be None" values.
 from typing import Optional
 

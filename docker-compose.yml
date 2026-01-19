@@ -1,0 +1,64 @@
+services:
+  api:
+    build: .
+    container_name: metrobikeatlas-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - METROBIKEATLAS_DEMO_MODE=false
+      - METROBIKEATLAS_HOST=0.0.0.0
+      - METROBIKEATLAS_PROXY_HEADERS=true
+      - METROBIKEATLAS_FORWARDED_ALLOW_IPS=*
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/status"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  collector:
+    build: .
+    container_name: metrobikeatlas-collector
+    env_file:
+      - .env
+    environment:
+      - METROBIKEATLAS_DEMO_MODE=false
+      # Conservative defaults for long-running local ops:
+      - TDX_MIN_REQUEST_INTERVAL_S=0.6
+      - TDX_REQUEST_JITTER_S=0.2
+      - BRONZE_RETAIN_AVAIL_FILES_PER_CITY=288
+      - BRONZE_RETAIN_AVAIL_DAYS=2
+      - BRONZE_RETAIN_STATIONS_FILES_PER_CITY=4
+      - BRONZE_CLEANUP_INTERVAL_SECONDS=600
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    command:
+      [
+        "python",
+        "scripts/collect_tdx_continuous.py",
+        "--availability-interval-seconds",
+        "600",
+        "--stations-refresh-interval-hours",
+        "24",
+        "--jitter-seconds",
+        "5",
+        "--build-silver-interval-seconds",
+        "1800",
+      ]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "scripts/collector_status.py", "--repo-root", "/app"]
+      interval: 30s
+      timeout: 5s
+      retries: 10

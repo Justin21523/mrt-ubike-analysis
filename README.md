@@ -44,9 +44,38 @@ Run Bronze → Silver → Gold in one go:
 
 - `python scripts/run_pipeline_mvp.py --collect-duration-seconds 3600 --collect-interval-seconds 300`
 
+### Continuous ingestion (real data)
+
+If you want a long-running collector that keeps writing TDX data to `data/bronze/` (with throttling + 429 handling),
+run:
+
+- `python scripts/collect_tdx_continuous.py --availability-interval-seconds 300`
+
+Optional: rebuild Silver periodically while collecting:
+
+- `python scripts/collect_tdx_continuous.py --availability-interval-seconds 300 --build-silver-interval-seconds 900`
+
 Validate Silver (schema + basic sanity checks):
 
 - `python scripts/validate_silver.py --strict`
+
+## Docker long-run (local)
+
+- Build + run: `docker compose up -d --build`
+- Stop: `docker compose down`
+- Logs: `docker compose logs -f api` / `docker compose logs -f collector`
+- Health:
+  - API: `GET /status` (compose healthcheck)
+  - Collector: `python scripts/collector_status.py --repo-root .` (compose healthcheck)
+
+### Proxy/SSE notes
+
+When running behind a reverse proxy (or inside Docker), enable proxy headers:
+- `METROBIKEATLAS_HOST=0.0.0.0`
+- `METROBIKEATLAS_PROXY_HEADERS=true`
+- `METROBIKEATLAS_FORWARDED_ALLOW_IPS=*`
+
+SSE endpoint `/events` emits both a comment keepalive and a `heartbeat` event periodically to reduce proxy disconnects.
 
 ### Build factors + analytics (Stage 3)
 

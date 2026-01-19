@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 # `argparse` provides a stable CLI interface for long-running ingestion jobs (cron/daemon friendly).
 import argparse
 # `logging` is used for continuous progress reporting and error visibility in long-running loops.
@@ -8,10 +16,10 @@ import logging
 import random
 # `time.sleep` is used for simple scheduling between polling iterations.
 import time
+# `os.getenv` enables per-run tuning (rate limiting) without changing code.
+import os
 # We use timezone-aware UTC timestamps for consistent stop conditions and file metadata.
 from datetime import datetime, timedelta, timezone
-# `Path` keeps filesystem operations cross-platform and avoids manual string joins.
-from pathlib import Path
 
 # Config is loaded at runtime so we can change endpoints/cities without changing code (production-minded).
 from metrobikeatlas.config.loader import load_config
@@ -25,6 +33,16 @@ from metrobikeatlas.utils.logging import configure_logging
 
 # Module-level logger is standard for consistent log formatting and handler configuration.
 logger = logging.getLogger(__name__)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
 
 
 # Helper to parse an optional comma-separated city override from CLI args.
@@ -104,6 +122,8 @@ def main() -> None:
         base_url=config.tdx.base_url,
         token_url=config.tdx.token_url,
         credentials=creds,
+        min_request_interval_s=_env_float("TDX_MIN_REQUEST_INTERVAL_S", 0.2),
+        request_jitter_s=_env_float("TDX_REQUEST_JITTER_S", 0.05),
     ) as tdx:
         # Loop counter is useful for deterministic stopping and for log context.
         i = 0
@@ -132,8 +152,8 @@ def main() -> None:
                     params = {"$format": "JSON"}
                     # Capture retrieval time in UTC so we can align snapshots across cities.
                     retrieved_at = datetime.now(timezone.utc)
-                    # Fetch raw JSON payload; token/retry logic is handled inside `TDXClient`.
-                    payload = tdx.get_json(path, params=params)
+                    # Fetch JSON payload (handles OData paging when needed, but usually returns a single list).
+                    payload = tdx.get_json_all(path, params=params, max_pages=int(os.getenv("TDX_MAX_PAGES", "100")))
                     # Persist the raw payload plus request metadata to Bronze for traceability.
                     out = write_bronze_json(
                         bronze_dir,

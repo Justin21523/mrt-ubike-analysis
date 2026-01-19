@@ -32,6 +32,28 @@ def load_dotenv_if_available(path: str = ".env") -> None:
     try:
         from dotenv import load_dotenv  # type: ignore
     except ModuleNotFoundError:
+        # Fall back to a tiny `.env` parser so production installs can still use local secrets
+        # without requiring an extra dependency.
+        dotenv_path = Path(path)
+        if not dotenv_path.exists():
+            return
+        for line in dotenv_path.read_text(encoding="utf-8").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            if raw.startswith("export "):
+                raw = raw[len("export ") :].strip()
+            if "=" not in raw:
+                continue
+            key, value = raw.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            # Match python-dotenv default: do not override existing env vars.
+            os.environ.setdefault(key, value)
         return
     load_dotenv(path)
 
