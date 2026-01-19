@@ -22,23 +22,33 @@ class StationService:
     def __init__(self, config: AppConfig) -> None:
         # Store the typed config so routes (and `/config`) can expose defaults to the UI.
         self._config = config
-        # Choose the repository implementation once at startup.
-        # Pitfall: this service instance is shared across requests (stored on `app.state`), so it must be
-        # effectively stateless or thread-safe; using a read-only repository object satisfies that.
-        self._repo = DemoRepository(config) if config.app.demo_mode else LocalRepository(config)
+        # Lazily initialize the repository so the API can start even when real-data artifacts
+        # (Silver/Gold files) are not built yet.
+        self._repo: DemoRepository | LocalRepository | None = None
 
     @property
     def config(self) -> AppConfig:
         # Expose config as a read-only property so callers cannot mutate settings accidentally.
         return self._config
 
+    def _get_repo(self) -> DemoRepository | LocalRepository:
+        if self._repo is not None:
+            return self._repo
+
+        if self._config.app.demo_mode:
+            self._repo = DemoRepository(self._config)
+            return self._repo
+
+        self._repo = LocalRepository(self._config)
+        return self._repo
+
     def list_stations(self) -> list[dict[str, Any]]:
         # Return metro station metadata for the map marker layer in the frontend.
-        return self._repo.list_metro_stations()
+        return self._get_repo().list_metro_stations()
 
     def list_bike_stations(self) -> list[dict[str, Any]]:
         # Return bike station metadata for overlays (nearby bikes, debug layers, etc.).
-        return self._repo.list_bike_stations()
+        return self._get_repo().list_bike_stations()
 
     def station_timeseries(
         self,
@@ -54,7 +64,7 @@ class StationService:
     ) -> dict[str, Any]:
         # Delegate to the repository which implements the actual retrieval + aggregation logic.
         # We keep the service signature close to the HTTP layer so runtime overrides stay explicit.
-        return self._repo.station_timeseries(
+        return self._get_repo().station_timeseries(
             # `station_id` is the stable key that links station metadata, bike links, and time series.
             station_id,
             # Spatial join params control which bike stations are considered "near" this metro station.
@@ -80,7 +90,7 @@ class StationService:
     ) -> list[dict[str, Any]]:
         # Return the bike stations linked to a metro station under the chosen join parameters.
         # The frontend uses this for map overlays and for explaining "why this curve looks like this".
-        return self._repo.nearby_bike(
+        return self._get_repo().nearby_bike(
             # Reuse `station_id` as the lookup key across all API endpoints for consistent routing.
             station_id,
             # Join params are optional so callers can omit them and rely on config defaults.
@@ -93,7 +103,7 @@ class StationService:
 
     def station_factors(self, station_id: str) -> dict[str, Any]:
         # Return station-level factor/features (Gold table) so the UI can render a "factor breakdown" panel.
-        return self._repo.station_factors(station_id)
+        return self._get_repo().station_factors(station_id)
 
     def similar_stations(
         self,
@@ -105,7 +115,7 @@ class StationService:
     ) -> list[dict[str, Any]]:
         # Return a k-nearest list in feature space for quick exploration (not heavy ML in MVP).
         # Pitfall: similarity metrics are sensitive to scale; `standardize=True` can avoid domination by 1 feature.
-        return self._repo.similar_stations(
+        return self._get_repo().similar_stations(
             # Anchor station to compare against.
             station_id,
             # Optional overrides allow experimenting from the UI without restarting the server.
@@ -117,4 +127,36 @@ class StationService:
     def analytics_overview(self) -> dict[str, Any]:
         # Return small precomputed global stats (e.g., correlations) for a dashboard summary panel.
         # Keeping this endpoint lightweight avoids shipping large tables over the network to the browser.
-        return self._repo.analytics_overview()
+        return self._get_repo().analytics_overview()
+
+    def metro_bike_availability_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        return self._get_repo().metro_bike_availability_index(limit=limit)
+
+    def metro_bike_availability_at(self, ts: str) -> list[dict[str, Any]]:
+        return self._get_repo().metro_bike_availability_at(ts)
+
+    def metro_heat_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        repo = self._get_repo()
+        fn = getattr(repo, "metro_heat_index", None)
+        if callable(fn):
+            return fn(limit=limit)
+        return repo.metro_bike_availability_index(limit=limit)
+
+    def metro_heat_at(self, ts: str, *, metric: str = "available", agg: str = "sum") -> list[dict[str, Any]]:
+        repo = self._get_repo()
+        fn = getattr(repo, "metro_heat_at", None)
+        if callable(fn):
+            return fn(ts, metric=metric, agg=agg)
+        rows = repo.metro_bike_availability_at(ts)
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "station_id": r.get("station_id"),
+                    "ts": r.get("ts"),
+                    "metric": "available",
+                    "agg": "sum",
+                    "value": r.get("available_bikes_total"),
+                }
+            )
+        return out

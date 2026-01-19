@@ -10,12 +10,17 @@ from fastapi import FastAPI
 
 # `FileResponse` efficiently streams a file from disk (used for serving `web/index.html`).
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 # `StaticFiles` serves assets (JS/CSS) so the browser (DOM) can load the dashboard bundle.
 from fastapi.staticfiles import StaticFiles
 
 # API routes are defined in a separate module to keep the app factory small and testable.
 from metrobikeatlas.api.routes import router
+
+# Background job manager runs local maintenance tasks (e.g., async build_silver) and stores logs on disk.
+from metrobikeatlas.api.jobs import JobManager
+from metrobikeatlas.api.briefing_store import BriefingSnapshotStore
 
 # `StationService` is our application service layer: it reads data (demo or local Silver/Gold)
 # and shapes it into payloads that the frontend consumes.
@@ -42,6 +47,11 @@ def create_app(config: AppConfig) -> FastAPI:
     # Store the service on `app.state` so route handlers can access it without global variables.
     # This is a simple dependency-injection pattern that keeps the dataflow explicit.
     app.state.station_service = StationService(config)
+    app.state.admin_rate_limiter = {}
+
+    # Admin "job center": async maintenance tasks with status/logs.
+    app.state.job_manager = JobManager(repo_root=resolve_repo_root())
+    app.state.briefing_store = BriefingSnapshotStore(repo_root=resolve_repo_root())
 
     # Register all API endpoints (e.g., `/stations`, `/station/{id}/timeseries`, `/config`).
     app.include_router(router)
@@ -66,6 +76,14 @@ def create_app(config: AppConfig) -> FastAPI:
         # Serve the HTML entrypoint; the browser then loads `/static/app.js` and renders the UI.
         # Pitfall: if `index.html` is missing, this will 500; keep the repo layout consistent.
         return FileResponse(index_html)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        # Optional: return favicon if present; otherwise avoid noisy 404s in the browser console.
+        icon = assets_dir / "favicon.ico"
+        if icon.exists():
+            return FileResponse(icon)
+        return Response(status_code=204)
 
     # Return the fully constructed app so callers (scripts/tests) can decide how to run it.
     return app

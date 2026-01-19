@@ -80,6 +80,8 @@ class DemoRepository:
             payload["district"] = meta.get("district")
             payload["cluster"] = idx
             out.append(payload)
+        for row in out:
+            row["source"] = "demo"
         return out
 
     def list_bike_stations(self) -> list[dict[str, Any]]:
@@ -245,6 +247,59 @@ class DemoRepository:
             "timezone": tz,
             "series": series,
         }
+
+    def metro_bike_availability_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        # Provide a small recent index for the heat layer controls.
+        now = datetime.now(self._tz).astimezone(ZoneInfo("UTC"))
+        out = []
+        for i in range(min(int(limit), 48)):
+            out.append({"ts": now - timedelta(minutes=15 * (47 - i))})
+        return out
+
+    def metro_bike_availability_at(self, ts: str) -> list[dict[str, Any]]:
+        # Deterministic synthetic totals for map shading in demo mode.
+        target = pd.to_datetime(ts, utc=True, errors="coerce")
+        if pd.isna(target):
+            raise ValueError(f"Invalid ts: {ts}")
+        rows = []
+        for metro in self._metro:
+            nearby = self.nearby_bike(metro.station_id, join_method="nearest", nearest_k=3)
+            total = sum(float(b.get("capacity") or 0) for b in nearby) * 0.4
+            rows.append({"station_id": metro.station_id, "ts": target.to_pydatetime(), "available_bikes_total": total})
+        return rows
+
+    def metro_heat_index(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        return self.metro_bike_availability_index(limit=limit)
+
+    def metro_heat_at(self, ts: str, *, metric: str = "available", agg: str = "sum") -> list[dict[str, Any]]:
+        target = pd.to_datetime(ts, utc=True, errors="coerce")
+        if pd.isna(target):
+            raise ValueError(f"Invalid ts: {ts}")
+
+        metric_key = str(metric).strip().lower()
+        if metric_key not in {"available", "rent_proxy", "return_proxy"}:
+            raise ValueError(f"Unsupported metric: {metric}")
+
+        agg_key = str(agg).strip().lower()
+        if agg_key not in {"sum", "mean"}:
+            raise ValueError(f"Unsupported agg: {agg}")
+
+        # Demo mode uses simple synthetic values; agg is effectively identical because each metro is a single point.
+        scale = 0.4 if metric_key == "available" else 0.1
+        rows = []
+        for metro in self._metro:
+            nearby = self.nearby_bike(metro.station_id, join_method="nearest", nearest_k=3)
+            total = sum(float(b.get("capacity") or 0) for b in nearby) * scale
+            rows.append(
+                {
+                    "station_id": metro.station_id,
+                    "ts": target.to_pydatetime(),
+                    "metric": metric_key,
+                    "agg": agg_key,
+                    "value": float(total),
+                }
+            )
+        return rows
 
     def station_factors(self, metro_station_id: str) -> dict[str, Any]:
         df = self._station_features.copy()
