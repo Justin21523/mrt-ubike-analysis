@@ -27,8 +27,12 @@ import sqlite3
 from metrobikeatlas.config.loader import load_config
 # External metro stations CSV provides a fallback when TDX metro station endpoints are unavailable.
 from metrobikeatlas.ingestion.external_inputs import (
+    load_external_calendar_csv,
     load_external_metro_stations_csv,
+    load_external_weather_hourly_csv,
+    validate_external_calendar_df,
     validate_external_metro_stations_df,
+    validate_external_weather_hourly_df,
 )
 # Bronze reader loads the wrapper JSON and returns a dict containing `retrieved_at`, `request`, and `payload`.
 from metrobikeatlas.ingestion.bronze import read_bronze_json
@@ -108,6 +112,9 @@ def main() -> None:
     parser.add_argument("--write-sqlite", action="store_true", help="Write `data/silver/metrobikeatlas.db` for scalable reads.")
     # Optional external metro station fallback for cases where TDX metro endpoints are unavailable (404).
     parser.add_argument("--external-metro-stations-csv", default="data/external/metro_stations.csv")
+    # Optional external datasets for policy/storytelling features.
+    parser.add_argument("--external-calendar-csv", default="data/external/calendar.csv")
+    parser.add_argument("--external-weather-hourly-csv", default="data/external/weather_hourly.csv")
     parser.add_argument(
         "--prefer-external-metro",
         action="store_true",
@@ -313,6 +320,53 @@ def main() -> None:
     print(f"Wrote {links_out}")
     _emit_event(build_id=build_id, stage="links", progress_pct=90, artifacts=[links_out])
 
+    # External datasets (optional) → Silver dims/facts.
+    external_sources: dict[str, object] = {}
+
+    cal_path = Path(args.external_calendar_csv)
+    if cal_path.exists():
+        cal_df = load_external_calendar_csv(cal_path)
+        issues = validate_external_calendar_df(cal_df)
+        errors = [i for i in issues if i.level == "error"]
+        if errors:
+            raise ValueError("Invalid external calendar CSV: " + "; ".join(i.message for i in errors))
+        cal_out = silver_dir / "calendar.csv"
+        cal_df.to_csv(cal_out, index=False)
+        print(f"Wrote {cal_out}")
+        try:
+            st = cal_path.stat()
+            external_sources["calendar_csv"] = {
+                "path": str(cal_path),
+                "exists": True,
+                "mtime_utc": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                "size_bytes": int(st.st_size),
+                "row_count": int(len(cal_df)),
+            }
+        except Exception:
+            external_sources["calendar_csv"] = {"path": str(cal_path), "exists": True, "row_count": int(len(cal_df))}
+
+    w_path = Path(args.external_weather_hourly_csv)
+    if w_path.exists():
+        w_df = load_external_weather_hourly_csv(w_path)
+        issues = validate_external_weather_hourly_df(w_df)
+        errors = [i for i in issues if i.level == "error"]
+        if errors:
+            raise ValueError("Invalid external weather hourly CSV: " + "; ".join(i.message for i in errors))
+        w_out = silver_dir / "weather_hourly.csv"
+        w_df.to_csv(w_out, index=False)
+        print(f"Wrote {w_out}")
+        try:
+            st = w_path.stat()
+            external_sources["weather_hourly_csv"] = {
+                "path": str(w_path),
+                "exists": True,
+                "mtime_utc": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                "size_bytes": int(st.st_size),
+                "row_count": int(len(w_df)),
+            }
+        except Exception:
+            external_sources["weather_hourly_csv"] = {"path": str(w_path), "exists": True, "row_count": int(len(w_df))}
+
     if args.write_sqlite:
         try:
             db_path = silver_dir / "metrobikeatlas.db"
@@ -356,12 +410,16 @@ def main() -> None:
             "bronze_dir": str(args.bronze_dir),
             "silver_dir": str(args.silver_dir),
             "max_availability_files": int(args.max_availability_files),
+            "write_sqlite": bool(args.write_sqlite),
             "external_metro_stations_csv": str(args.external_metro_stations_csv),
             "prefer_external_metro": bool(args.prefer_external_metro),
+            "external_calendar_csv": str(args.external_calendar_csv),
+            "external_weather_hourly_csv": str(args.external_weather_hourly_csv),
         },
         "sources": {
             "metro": metro_source,
             "external_metro_csv": external_csv_meta,
+            **external_sources,
             "metro_bronze_latest_by_city": metro_station_inputs,
             "bike_stations_latest_by_city": bike_station_inputs,
             "bike_availability_summary_by_city": availability_inputs,
@@ -384,6 +442,9 @@ def main() -> None:
             _artifact_status(links_out),
             _artifact_status(silver_dir / "bike_timeseries.csv"),
             _artifact_status(silver_dir / "metro_timeseries.csv"),
+            _artifact_status(silver_dir / "calendar.csv"),
+            _artifact_status(silver_dir / "weather_hourly.csv"),
+            _artifact_status(silver_dir / "metrobikeatlas.db"),
         ],
     }
     meta_out = silver_dir / "_build_meta.json"
@@ -409,6 +470,9 @@ def main() -> None:
             links_out,
             silver_dir / "bike_timeseries.csv",
             silver_dir / "metro_timeseries.csv",
+            silver_dir / "calendar.csv",
+            silver_dir / "weather_hourly.csv",
+            silver_dir / "metrobikeatlas.db",
             meta_out,
             schema_out,
         ],

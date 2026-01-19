@@ -3,6 +3,38 @@
 This folder is for optional, non-TDX datasets used to build city-factor features. Files here are **not**
 version-controlled (except this README and `.gitkeep`).
 
+## External calendar (CSV)
+
+Path (default): `data/external/calendar.csv`
+
+Required columns:
+- `date` (YYYY-MM-DD)
+- `is_holiday` (0/1 or true/false)
+
+Optional columns:
+- `name`
+
+Used by: `python scripts/build_silver.py` (writes `data/silver/calendar.csv` when present).
+
+Template: `docs/examples/external_calendar.csv`
+
+## External weather hourly (CSV)
+
+Path (default): `data/external/weather_hourly.csv`
+
+Required columns:
+- `ts` (timestamp; ISO8601 recommended)
+- `city`
+- `temp_c`
+- `precip_mm`
+
+Optional columns:
+- `humidity_pct`
+
+Used by: `python scripts/build_silver.py` (writes `data/silver/weather_hourly.csv` when present).
+
+Template: `docs/examples/external_weather_hourly.csv`
+
 ## Admin boundaries (GeoJSON)
 
 Path (default): `data/external/admin_boundaries.geojson`
@@ -37,4 +69,3 @@ Optional columns:
 
 You can generate a baseline POI dataset from OpenStreetMap:
 - `python scripts/fetch_poi_overpass.py`
-

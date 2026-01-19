@@ -79,3 +79,120 @@ def validate_external_metro_stations_df(df: pd.DataFrame) -> list[ExternalCsvIss
 
     return issues
 
+
+def load_external_calendar_csv(path: Path) -> pd.DataFrame:
+    """
+    Load an external calendar CSV.
+
+    Required columns:
+    - date (YYYY-MM-DD)
+    - is_holiday (0/1 or true/false)
+
+    Optional columns:
+    - name (holiday/event name)
+    """
+
+    df = pd.read_csv(Path(path), dtype={"date": str})
+    df.columns = [str(c).strip() for c in df.columns]
+
+    required = {"date", "is_holiday"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in external calendar CSV: {sorted(missing)}")
+
+    out = df.copy()
+    out["date"] = out["date"].astype(str).str.strip()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+    v = out["is_holiday"]
+    if v.dtype == bool:
+        out["is_holiday"] = v.astype(int)
+    else:
+        s = v.astype(str).str.strip().str.lower()
+        out["is_holiday"] = s.isin({"1", "true", "yes", "y", "on"}).astype(int)
+
+    if "name" not in out.columns:
+        out["name"] = ""
+    out["name"] = out["name"].fillna("").astype(str)
+    return out[["date", "is_holiday", "name"]].copy()
+
+
+def validate_external_calendar_df(df: pd.DataFrame) -> list[ExternalCsvIssue]:
+    issues: list[ExternalCsvIssue] = []
+    required = {"date", "is_holiday"}
+    missing = required - set(df.columns)
+    if missing:
+        issues.append(ExternalCsvIssue("error", f"Missing columns: {sorted(missing)}"))
+        return issues
+
+    date = pd.to_datetime(df["date"], errors="coerce")
+    if date.isna().any():
+        issues.append(ExternalCsvIssue("error", "Invalid `date` values found (expected YYYY-MM-DD)."))
+    dup = int(pd.Series(df["date"].astype(str)).duplicated().sum())
+    if dup:
+        issues.append(ExternalCsvIssue("warning", f"Duplicate date rows: {dup}"))
+
+    is_holiday = pd.to_numeric(df["is_holiday"], errors="coerce")
+    if is_holiday.isna().any():
+        issues.append(ExternalCsvIssue("error", "Non-numeric `is_holiday` values found."))
+    if ((is_holiday < 0) | (is_holiday > 1)).any():
+        issues.append(ExternalCsvIssue("warning", "`is_holiday` values outside {0,1} found (will be treated as truthy)."))
+    return issues
+
+
+def load_external_weather_hourly_csv(path: Path) -> pd.DataFrame:
+    """
+    Load an external hourly weather CSV.
+
+    Required columns:
+    - ts (timestamp; ISO8601 recommended)
+    - city
+    - temp_c
+    - precip_mm
+    """
+
+    df = pd.read_csv(Path(path), dtype={"city": str})
+    df.columns = [str(c).strip() for c in df.columns]
+
+    required = {"ts", "city", "temp_c", "precip_mm"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in external weather hourly CSV: {sorted(missing)}")
+
+    out = df.copy()
+    out["city"] = out["city"].astype(str)
+    out["ts"] = pd.to_datetime(out["ts"], utc=True, errors="coerce")
+    out = out.dropna(subset=["ts"])
+    out["ts"] = out["ts"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    out["temp_c"] = pd.to_numeric(out["temp_c"], errors="coerce")
+    out["precip_mm"] = pd.to_numeric(out["precip_mm"], errors="coerce")
+    if "humidity_pct" in out.columns:
+        out["humidity_pct"] = pd.to_numeric(out["humidity_pct"], errors="coerce")
+    else:
+        out["humidity_pct"] = pd.NA
+
+    cols = ["ts", "city", "temp_c", "precip_mm", "humidity_pct"]
+    return out[cols].copy()
+
+
+def validate_external_weather_hourly_df(df: pd.DataFrame) -> list[ExternalCsvIssue]:
+    issues: list[ExternalCsvIssue] = []
+    required = {"ts", "city", "temp_c", "precip_mm"}
+    missing = required - set(df.columns)
+    if missing:
+        issues.append(ExternalCsvIssue("error", f"Missing columns: {sorted(missing)}"))
+        return issues
+
+    ts = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+    if ts.isna().any():
+        issues.append(ExternalCsvIssue("error", "Invalid `ts` values found (expected timestamp)."))
+    city = df["city"].astype(str)
+    if (city.str.strip() == "").any():
+        issues.append(ExternalCsvIssue("error", "Empty `city` values found."))
+
+    for c in ["temp_c", "precip_mm"]:
+        v = pd.to_numeric(df[c], errors="coerce")
+        if v.isna().any():
+            issues.append(ExternalCsvIssue("error", f"Non-numeric `{c}` values found."))
+    return issues
