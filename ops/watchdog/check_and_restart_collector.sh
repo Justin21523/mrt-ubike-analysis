@@ -51,3 +51,8 @@ fi
 
 echo "collector ok"
 
+# Trigger API alert webhook evaluation (critical-only with dedupe) if the API is up.
+# This avoids needing a human to open the UI for notifications to fire.
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS http://127.0.0.1:8000/status >/dev/null 2>&1 || true
+fi
