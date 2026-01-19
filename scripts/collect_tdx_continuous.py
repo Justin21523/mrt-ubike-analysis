@@ -351,6 +351,115 @@ def _run_build_silver(*, repo_root: Path, bronze_dir: Path, silver_dir: Path, ma
     subprocess.run(cmd, check=True)
 
 
+def _latest_bike_availability_by_city(*, bronze_dir: Path, cities: list[str]) -> dict[str, str | None]:
+    out: dict[str, str | None] = {}
+    for city in cities:
+        city_dir = bronze_dir / "tdx" / "bike" / "availability" / f"city={city}"
+        files = sorted(city_dir.glob("*.json"))
+        out[city] = str(files[-1]) if files else None
+    return out
+
+
+def _load_json(path: Path) -> dict[str, object] | None:
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def _should_build_silver(
+    *,
+    repo_root: Path,
+    bronze_dir: Path,
+    silver_dir: Path,
+    bike_cities: list[str],
+) -> tuple[bool, str]:
+    """
+    Decide whether to run build_silver based on whether inputs changed.
+
+    Goal: avoid rebuilding on a timer when no new Bronze snapshots arrived.
+    """
+
+    if _parse_bool(os.getenv("BUILD_SILVER_ALWAYS"), default=False):
+        return True, "forced"
+
+    build_meta_path = silver_dir / "_build_meta.json"
+    build_meta = _load_json(build_meta_path) if build_meta_path.exists() else None
+
+    current_latest = _latest_bike_availability_by_city(bronze_dir=bronze_dir, cities=bike_cities)
+    if any(v is None for v in current_latest.values()):
+        return True, "missing_bronze_availability"
+
+    want_sqlite = _parse_bool(os.getenv("BUILD_SILVER_WRITE_SQLITE"), default=False) or (
+        (os.getenv("METROBIKEATLAS_STORAGE") or "").strip().lower() == "sqlite"
+    )
+    if want_sqlite and not (silver_dir / "metrobikeatlas.db").exists():
+        return True, "sqlite_missing"
+
+    if not isinstance(build_meta, dict):
+        return True, "no_previous_build_meta"
+
+    try:
+        inputs = build_meta.get("inputs")
+        prev_sources = inputs.get("sources") if isinstance(inputs, dict) else {}
+    except Exception:
+        prev_sources = {}
+
+    prev_avail = prev_sources.get("bike_availability_summary_by_city") if isinstance(prev_sources, dict) else None
+    prev_latest_by_city: dict[str, str | None] = {}
+    if isinstance(prev_avail, list):
+        for it in prev_avail:
+            if not isinstance(it, dict):
+                continue
+            city = str(it.get("city") or "").strip()
+            if not city:
+                continue
+            prev_latest_by_city[city] = str(it.get("latest_path") or "") or None
+
+    # Compare latest file path strings. build_silver stores repo-relative paths.
+    for city, cur_path in current_latest.items():
+        if cur_path is None:
+            continue
+        try:
+            cur_rel = str(Path(cur_path).relative_to(repo_root))
+        except Exception:
+            cur_rel = str(cur_path)
+        prev_rel = prev_latest_by_city.get(city)
+        if not prev_rel or prev_rel != cur_rel:
+            return True, "bronze_availability_changed"
+
+    def _mtime(p: Path) -> float | None:
+        try:
+            return p.stat().st_mtime
+        except Exception:
+            return None
+
+    # External inputs: if metro/calendar/weather CSV mtimes changed since the last build, rebuild.
+    ext_metro = repo_root / "data" / "external" / "metro_stations.csv"
+    ext_calendar = repo_root / "data" / "external" / "calendar.csv"
+    ext_weather = repo_root / "data" / "external" / "weather_hourly.csv"
+    for key, p in [
+        ("external_metro_csv", ext_metro),
+        ("calendar_csv", ext_calendar),
+        ("weather_hourly_csv", ext_weather),
+    ]:
+        if not p.exists():
+            continue
+        prev = prev_sources.get(key) if isinstance(prev_sources, dict) else None
+        prev_mtime = None
+        if isinstance(prev, dict) and prev.get("mtime_utc"):
+            try:
+                prev_mtime = datetime.fromisoformat(str(prev.get("mtime_utc"))).astimezone(timezone.utc).timestamp()
+            except Exception:
+                prev_mtime = None
+        cur_mtime = _mtime(p)
+        if prev_mtime is None or (cur_mtime is not None and cur_mtime > prev_mtime + 1.0):
+            return True, f"{key}_changed"
+
+    return False, "no_new_inputs"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -798,6 +907,18 @@ def main() -> None:
                 try:
                     st = backoff_states["build_silver"]
                     if _backoff_ready(st, datetime.now(timezone.utc)):
+                        should, reason = _should_build_silver(
+                            repo_root=repo_root,
+                            bronze_dir=bronze_dir,
+                            silver_dir=silver_dir,
+                            bike_cities=bike_cities,
+                        )
+                        if not should:
+                            logger.info("Skipping build_silver: %s", reason)
+                            next_build_silver = datetime.now(timezone.utc) + timedelta(
+                                seconds=int(args.build_silver_interval_seconds)
+                            )
+                            continue
                         _run_build_silver(
                             repo_root=repo_root,
                             bronze_dir=bronze_dir,
