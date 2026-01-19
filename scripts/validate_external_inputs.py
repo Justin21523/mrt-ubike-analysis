@@ -11,6 +11,7 @@ sys.path.insert(0, str(SRC_PATH))
 import argparse
 
 from metrobikeatlas.ingestion.external_inputs import (
+    ExternalCsvIssue,
     load_external_calendar_csv,
     load_external_metro_stations_csv,
     load_external_weather_hourly_csv,
@@ -28,42 +29,64 @@ def main() -> None:
         help="Path to external metro station CSV (fallback for TDX metro stations).",
     )
     parser.add_argument(
+        "--require-metro-stations",
+        action="store_true",
+        help="Treat missing --metro-stations-csv as an error (useful for strict real-mode deployments).",
+    )
+    parser.add_argument(
         "--calendar-csv",
-        default=None,
+        default="data/external/calendar.csv",
         help="Optional external calendar CSV (date,is_holiday,name). If provided, it will be validated.",
     )
     parser.add_argument(
+        "--require-calendar",
+        action="store_true",
+        help="Treat missing --calendar-csv as an error (useful when you rely on holiday effects).",
+    )
+    parser.add_argument(
         "--weather-hourly-csv",
-        default=None,
+        default="data/external/weather_hourly.csv",
         help="Optional external hourly weather CSV (ts,city,temp_c,precip_mm,...). If provided, it will be validated.",
+    )
+    parser.add_argument(
+        "--require-weather-hourly",
+        action="store_true",
+        help="Treat missing --weather-hourly-csv as an error (useful when you rely on rain effects).",
     )
     parser.add_argument("--strict", action="store_true", help="Exit non-zero if any errors are found.")
     args = parser.parse_args()
 
-    all_issues = []
+    all_issues: list[ExternalCsvIssue] = []
 
     metro_path = Path(args.metro_stations_csv)
-    if not metro_path.exists():
-        raise FileNotFoundError(metro_path)
-    metro_df = load_external_metro_stations_csv(metro_path)
-    metro_issues = validate_external_metro_stations_df(metro_df)
-    all_issues.extend(metro_issues)
+    if metro_path.exists():
+        metro_df = load_external_metro_stations_csv(metro_path)
+        metro_issues = validate_external_metro_stations_df(metro_df)
+        all_issues.extend(metro_issues)
+    elif args.require_metro_stations:
+        all_issues.append(ExternalCsvIssue("error", f"Missing file: {metro_path}"))
+    else:
+        all_issues.append(ExternalCsvIssue("warning", f"Missing file (skipped): {metro_path}"))
 
-    if args.calendar_csv:
-        cal_path = Path(args.calendar_csv)
-        if not cal_path.exists():
-            raise FileNotFoundError(cal_path)
+    cal_path = Path(args.calendar_csv) if args.calendar_csv else None
+    if cal_path is not None and cal_path.exists():
         cal_df = load_external_calendar_csv(cal_path)
         cal_issues = validate_external_calendar_df(cal_df)
         all_issues.extend(cal_issues)
+    elif args.require_calendar and cal_path is not None:
+        all_issues.append(ExternalCsvIssue("error", f"Missing file: {cal_path}"))
+    elif cal_path is not None:
+        all_issues.append(ExternalCsvIssue("warning", f"Missing file (skipped): {cal_path}"))
 
-    if args.weather_hourly_csv:
-        w_path = Path(args.weather_hourly_csv)
-        if not w_path.exists():
-            raise FileNotFoundError(w_path)
+    w_path = Path(args.weather_hourly_csv) if args.weather_hourly_csv else None
+    if w_path is not None and w_path.exists():
         w_df = load_external_weather_hourly_csv(w_path)
         w_issues = validate_external_weather_hourly_df(w_df)
         all_issues.extend(w_issues)
+    elif args.require_weather_hourly and w_path is not None:
+        all_issues.append(ExternalCsvIssue("error", f"Missing file: {w_path}"))
+    elif w_path is not None:
+        all_issues.append(ExternalCsvIssue("warning", f"Missing file (skipped): {w_path}"))
 
     errors = [i for i in all_issues if i.level == "error"]
     warnings = [i for i in all_issues if i.level == "warning"]
