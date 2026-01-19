@@ -1,0 +1,11 @@
+[Unit]
+Description=MetroBikeAtlas watchdog timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=metrobikeatlas-watchdog.service
+
+[Install]
+WantedBy=timers.target
+

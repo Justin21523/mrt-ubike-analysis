@@ -88,10 +88,31 @@ systemctl status metrobikeatlas-compose --no-pager
 docker compose ps
 ```
 
-## 6) Operational tips
+## 6) Watchdog (auto-restart if collector is stale)
+
+This is optional but recommended for long-running ops. It restarts the collector container when its
+`collector_heartbeat.json` stops updating (stuck process / network issues / rare edge cases).
+
+1) Install + enable:
+
+```bash
+sudo cp ops/systemd/metrobikeatlas-watchdog.service /etc/systemd/system/metrobikeatlas-watchdog.service
+sudo cp ops/systemd/metrobikeatlas-watchdog.timer /etc/systemd/system/metrobikeatlas-watchdog.timer
+sudo sed -i "s|/ABSOLUTE/PATH/TO/mrt-ubike-analysis|$PWD|g" /etc/systemd/system/metrobikeatlas-watchdog.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now metrobikeatlas-watchdog.timer
+```
+
+2) Inspect runs:
+
+```bash
+systemctl list-timers --all | rg metrobikeatlas-watchdog
+journalctl -u metrobikeatlas-watchdog --no-pager -n 100
+```
+
+## 7) Operational tips
 
 - Tune rate limiting: edit `.env` and `docker compose up -d` again.
 - If CSV grows large: run `python scripts/build_silver.py --write-sqlite` once and set:
   - `METROBIKEATLAS_STORAGE=sqlite`
   - `METROBIKEATLAS_LAZY_BIKE_TS=true`
-

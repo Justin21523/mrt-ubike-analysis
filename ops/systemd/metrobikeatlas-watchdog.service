@@ -1,0 +1,12 @@
+[Unit]
+Description=MetroBikeAtlas watchdog (restart collector if stale)
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/ABSOLUTE/PATH/TO/mrt-ubike-analysis
+Environment=HEARTBEAT_STALE_SECONDS=1800
+ExecStart=/bin/bash ops/watchdog/check_and_restart_collector.sh
+TimeoutStartSec=60
+
