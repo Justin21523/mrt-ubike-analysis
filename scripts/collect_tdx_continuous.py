@@ -340,6 +340,11 @@ def _run_build_silver(*, repo_root: Path, bronze_dir: Path, silver_dir: Path, ma
         "--max-availability-files",
         str(int(max_availability_files)),
     ]
+    write_sqlite = _parse_bool(os.getenv("BUILD_SILVER_WRITE_SQLITE"), default=False) or (
+        (os.getenv("METROBIKEATLAS_STORAGE") or "").strip().lower() == "sqlite"
+    )
+    if write_sqlite:
+        cmd.append("--write-sqlite")
     if external_metro.exists():
         cmd += ["--external-metro-stations-csv", str(external_metro)]
     logger.info("Running: %s", " ".join(cmd))

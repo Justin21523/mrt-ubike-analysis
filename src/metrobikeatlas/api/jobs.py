@@ -303,6 +303,10 @@ class JobManager:
 
         scripts_dir = self._repo_root / "scripts"
         cmd = [sys.executable, str(scripts_dir / "build_silver_locked.py")]
+        if (os.getenv("METROBIKEATLAS_STORAGE") or "").strip().lower() == "sqlite" or (
+            os.getenv("BUILD_SILVER_WRITE_SQLITE") or ""
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}:
+            cmd.append("--write-sqlite")
         if args:
             cmd += list(args)
 

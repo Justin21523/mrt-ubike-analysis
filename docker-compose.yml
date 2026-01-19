@@ -12,6 +12,8 @@ services:
       - METROBIKEATLAS_HOST=0.0.0.0
       - METROBIKEATLAS_PROXY_HEADERS=true
       - METROBIKEATLAS_FORWARDED_ALLOW_IPS=*
+      - METROBIKEATLAS_STORAGE=sqlite
+      - METROBIKEATLAS_LAZY_BIKE_TS=true
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -37,9 +39,11 @@ services:
       - .env
     environment:
       - METROBIKEATLAS_DEMO_MODE=false
+      - METROBIKEATLAS_STORAGE=sqlite
       # Conservative defaults for long-running local ops:
       - TDX_MIN_REQUEST_INTERVAL_S=0.6
       - TDX_REQUEST_JITTER_S=0.2
+      - BUILD_SILVER_WRITE_SQLITE=true
       - BRONZE_RETAIN_AVAIL_FILES_PER_CITY=288
       - BRONZE_RETAIN_AVAIL_DAYS=2
       - BRONZE_RETAIN_STATIONS_FILES_PER_CITY=4
