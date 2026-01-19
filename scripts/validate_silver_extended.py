@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+# Allow running scripts without requiring an editable install (`pip install -e .`).
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
+
 import argparse
 from datetime import datetime, timezone
 import os
 import urllib.request
-from pathlib import Path
 
 from metrobikeatlas.quality.contract import compute_schema_meta, validate_silver_extended, write_json
 
@@ -66,4 +73,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
