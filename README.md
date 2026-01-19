@@ -61,6 +61,7 @@ Validate Silver (schema + basic sanity checks):
 
 ## Docker long-run (local)
 
+- Full runbook: `docs/09_docker_longrun.md`
 - Build + run: `docker compose up -d --build`
 - Stop: `docker compose down`
 - Logs: `docker compose logs -f api` / `docker compose logs -f collector`
