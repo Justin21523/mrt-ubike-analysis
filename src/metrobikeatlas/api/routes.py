@@ -305,6 +305,27 @@ def _meta_contract(
     build_id = build_meta.get("build_id") if isinstance(build_meta, dict) else None
     inputs_hash = build_meta.get("inputs_hash") if isinstance(build_meta, dict) else None
 
+    silver_dir = repo_root / "data" / "silver"
+    calendar_silver = silver_dir / "calendar.csv"
+    weather_silver = silver_dir / "weather_hourly.csv"
+    db_path = silver_dir / "metrobikeatlas.db"
+    has_calendar = calendar_silver.exists()
+    has_weather = weather_silver.exists()
+    has_sqlite = db_path.exists()
+
+    external_sources = (build_meta.get("inputs") or {}).get("sources") if isinstance(build_meta, dict) else None
+    ext: dict[str, object] = {
+        "has_calendar": bool(has_calendar),
+        "has_weather_hourly": bool(has_weather),
+        "has_sqlite": bool(has_sqlite),
+        "silver": {
+            "calendar": _file_status(calendar_silver).model_dump(mode="json"),
+            "weather_hourly": _file_status(weather_silver).model_dump(mode="json"),
+            "sqlite_db": _file_status(db_path).model_dump(mode="json"),
+        },
+        "sources": external_sources if isinstance(external_sources, dict) else {},
+    }
+
     if service.config.app.demo_mode:
         source = "demo"
     else:
@@ -316,6 +337,7 @@ def _meta_contract(
         "silver_build_id": build_id,
         "inputs_hash": inputs_hash,
         "silver_build_meta": build_meta,
+        "external": ext,
     }
     if extra:
         out.update(extra)
@@ -755,6 +777,9 @@ def _resolved_station_query_meta(
         _file_status(silver_dir / "metro_bike_links.csv").model_dump(mode="json"),
         _file_status(silver_dir / "bike_timeseries.csv").model_dump(mode="json"),
         _file_status(silver_dir / "metro_timeseries.csv").model_dump(mode="json"),
+        _file_status(silver_dir / "calendar.csv").model_dump(mode="json"),
+        _file_status(silver_dir / "weather_hourly.csv").model_dump(mode="json"),
+        _file_status(silver_dir / "metrobikeatlas.db").model_dump(mode="json"),
     ]
 
     query: dict[str, object] = {}
@@ -782,6 +807,7 @@ def _resolved_station_query_meta(
         "resolved": resolved,
         "silver_artifacts": artifacts,
         "silver_build_meta": silver_build_meta,
+        "external": _meta_contract(service=service).get("external"),
     }
 
 
@@ -1907,6 +1933,352 @@ async def upload_external_metro_stations(
         head=head,
     )
 
+
+@router.get("/external/calendar/validate", response_model=ExternalValidationOut)
+def validate_external_calendar(request: Request) -> ExternalValidationOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "calendar.csv"
+    if not path.exists():
+        return ExternalValidationOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": "File not found"}],
+            head=[],
+        )
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_calendar_csv, validate_external_calendar_df
+
+    try:
+        df = load_external_calendar_csv(path)
+        issues = validate_external_calendar_df(df)
+    except Exception as e:
+        return ExternalValidationOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            head=[],
+        )
+
+    ok = not any(i.level == "error" for i in issues)
+    head = df.head(5).to_dict(orient="records") if not df.empty else []
+    return ExternalValidationOut(
+        ok=ok,
+        path=str(path),
+        row_count=int(len(df)),
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        head=head,
+    )
+
+
+@router.get("/external/calendar/preview", response_model=ExternalPreviewOut)
+def preview_external_calendar(request: Request, limit: int = 50) -> ExternalPreviewOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "calendar.csv"
+    if not path.exists():
+        return ExternalPreviewOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": "File not found"}],
+            columns=[],
+            rows=[],
+        )
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_calendar_csv, validate_external_calendar_df
+    import csv
+
+    try:
+        df = load_external_calendar_csv(path)
+        issues = validate_external_calendar_df(df)
+        ok = not any(i.level == "error" for i in issues)
+        row_count = int(len(df))
+    except Exception as e:
+        return ExternalPreviewOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            columns=[],
+            rows=[],
+        )
+
+    rows: list[dict[str, object]] = []
+    columns: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            columns = list(reader.fieldnames or [])
+            for i, r in enumerate(reader):
+                if i >= max(int(limit), 1):
+                    break
+                row = {"_row_number": i + 2}
+                row.update({k: (v if v is not None else "") for k, v in r.items()})
+                rows.append(row)
+    except Exception:
+        rows = []
+        columns = []
+
+    return ExternalPreviewOut(
+        ok=ok,
+        path=str(path),
+        row_count=row_count,
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        columns=(["_row_number"] + columns) if columns else [],
+        rows=rows,
+    )
+
+
+@router.get("/external/calendar/download", response_class=FileResponse)
+def download_external_calendar(request: Request) -> FileResponse:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "calendar.csv"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path)
+
+
+@router.post("/external/calendar/upload", response_model=ExternalValidationOut)
+async def upload_external_calendar(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+) -> ExternalValidationOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    out_path = repo_root / "data" / "external" / "calendar.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(".csv.uploading")
+
+    data = await file.read()
+    tmp_path.write_bytes(data)
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_calendar_csv, validate_external_calendar_df
+
+    try:
+        df = load_external_calendar_csv(tmp_path)
+        issues = validate_external_calendar_df(df)
+    except Exception as e:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+        return ExternalValidationOut(
+            ok=False,
+            path=str(out_path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            head=[],
+        )
+
+    ok = not any(i.level == "error" for i in issues)
+    if not ok:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+        head = df.head(5).to_dict(orient="records") if not df.empty else []
+        return ExternalValidationOut(
+            ok=False,
+            path=str(out_path),
+            row_count=int(len(df)),
+            issues=[{"level": i.level, "message": i.message} for i in issues],
+            head=head,
+        )
+
+    if dry_run:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+    else:
+        tmp_path.replace(out_path)
+    head = df.head(5).to_dict(orient="records") if not df.empty else []
+    return ExternalValidationOut(
+        ok=True,
+        path=str(out_path),
+        row_count=int(len(df)),
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        head=head,
+    )
+
+
+@router.get("/external/weather_hourly/validate", response_model=ExternalValidationOut)
+def validate_external_weather_hourly(request: Request) -> ExternalValidationOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "weather_hourly.csv"
+    if not path.exists():
+        return ExternalValidationOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": "File not found"}],
+            head=[],
+        )
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_weather_hourly_csv, validate_external_weather_hourly_df
+
+    try:
+        df = load_external_weather_hourly_csv(path)
+        issues = validate_external_weather_hourly_df(df)
+    except Exception as e:
+        return ExternalValidationOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            head=[],
+        )
+
+    ok = not any(i.level == "error" for i in issues)
+    head = df.head(5).to_dict(orient="records") if not df.empty else []
+    return ExternalValidationOut(
+        ok=ok,
+        path=str(path),
+        row_count=int(len(df)),
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        head=head,
+    )
+
+
+@router.get("/external/weather_hourly/preview", response_model=ExternalPreviewOut)
+def preview_external_weather_hourly(request: Request, limit: int = 50) -> ExternalPreviewOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "weather_hourly.csv"
+    if not path.exists():
+        return ExternalPreviewOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": "File not found"}],
+            columns=[],
+            rows=[],
+        )
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_weather_hourly_csv, validate_external_weather_hourly_df
+    import csv
+
+    try:
+        df = load_external_weather_hourly_csv(path)
+        issues = validate_external_weather_hourly_df(df)
+        ok = not any(i.level == "error" for i in issues)
+        row_count = int(len(df))
+    except Exception as e:
+        return ExternalPreviewOut(
+            ok=False,
+            path=str(path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            columns=[],
+            rows=[],
+        )
+
+    rows: list[dict[str, object]] = []
+    columns: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            columns = list(reader.fieldnames or [])
+            for i, r in enumerate(reader):
+                if i >= max(int(limit), 1):
+                    break
+                row = {"_row_number": i + 2}
+                row.update({k: (v if v is not None else "") for k, v in r.items()})
+                rows.append(row)
+    except Exception:
+        rows = []
+        columns = []
+
+    return ExternalPreviewOut(
+        ok=ok,
+        path=str(path),
+        row_count=row_count,
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        columns=(["_row_number"] + columns) if columns else [],
+        rows=rows,
+    )
+
+
+@router.get("/external/weather_hourly/download", response_class=FileResponse)
+def download_external_weather_hourly(request: Request) -> FileResponse:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "data" / "external" / "weather_hourly.csv"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path)
+
+
+@router.post("/external/weather_hourly/upload", response_model=ExternalValidationOut)
+async def upload_external_weather_hourly(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+) -> ExternalValidationOut:
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    out_path = repo_root / "data" / "external" / "weather_hourly.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(".csv.uploading")
+
+    data = await file.read()
+    tmp_path.write_bytes(data)
+
+    from metrobikeatlas.ingestion.external_inputs import load_external_weather_hourly_csv, validate_external_weather_hourly_df
+
+    try:
+        df = load_external_weather_hourly_csv(tmp_path)
+        issues = validate_external_weather_hourly_df(df)
+    except Exception as e:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+        return ExternalValidationOut(
+            ok=False,
+            path=str(out_path),
+            row_count=0,
+            issues=[{"level": "error", "message": f"Failed to load CSV: {e}"}],
+            head=[],
+        )
+
+    ok = not any(i.level == "error" for i in issues)
+    if not ok:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+        head = df.head(5).to_dict(orient="records") if not df.empty else []
+        return ExternalValidationOut(
+            ok=False,
+            path=str(out_path),
+            row_count=int(len(df)),
+            issues=[{"level": i.level, "message": i.message} for i in issues],
+            head=head,
+        )
+
+    if dry_run:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+    else:
+        tmp_path.replace(out_path)
+    head = df.head(5).to_dict(orient="records") if not df.empty else []
+    return ExternalValidationOut(
+        ok=True,
+        path=str(out_path),
+        row_count=int(len(df)),
+        issues=[{"level": i.level, "message": i.message} for i in issues],
+        head=head,
+    )
+
 # Bike station metadata endpoint (used for overlays and debug tooling in the dashboard).
 @router.get("/bike_stations", response_model=list[BikeStationOut])
 def list_bike_stations(service: StationService = Depends(get_service)) -> list[BikeStationOut]:
@@ -2199,7 +2571,10 @@ def station_timeseries(
         # Bad user input (e.g., unsupported granularity) maps to 400 for a clear client-side error.
         # Note: FastAPI may also return 422 for validation errors before this handler runs.
         raise HTTPException(status_code=400, detail=str(e))
-    payload["meta"] = _resolved_station_query_meta(
+    base_meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    payload["meta"] = {
+        **base_meta,
+        **_resolved_station_query_meta(
         station_id=station_id,
         service=service,
         endpoint="timeseries",
@@ -2210,7 +2585,8 @@ def station_timeseries(
         timezone=timezone,
         window_days=window_days,
         metro_series=metro_series,
-    )
+        ),
+    }
     # Validate the payload shape against the Pydantic model (defensive programming for API stability).
     return StationTimeSeriesOut.model_validate(payload)
 
