@@ -442,6 +442,11 @@ def main() -> None:
     heartbeat_path = logs_dir / "collector_heartbeat.json"
     metrics_path = logs_dir / "collector_metrics.json"
     lock_path = logs_dir / "collector.lock"
+    external_metro_path = repo_root / "data" / "external" / "metro_stations.csv"
+    skip_metro_stations = _parse_bool(
+        os.getenv("TDX_SKIP_METRO_STATIONS"),
+        default=external_metro_path.exists(),
+    )
     last_success_utc: str | None = None
     last_error_utc: str | None = None
     last_error: str | None = None
@@ -583,35 +588,48 @@ def main() -> None:
 
             try:
                 if refresh_td.total_seconds() == 0 or now >= next_station_refresh:
-                    logger.info("Refreshing station metadata (metro=%s, bike=%s)", metro_cities, bike_cities)
-                    try:
-                        st = backoff_states["tdx:metro:stations"]
-                        if _backoff_ready(st, now):
-                            _collect_station_dataset(
-                                tdx=tdx,
-                                bronze_dir=bronze_dir,
-                                cache=cache,
-                                use_cache=use_cache,
-                                source="tdx",
-                                domain="metro",
-                                dataset="stations",
-                                cities=metro_cities,
-                                path_template=config.tdx.metro.stations_path_template,
-                                cache_namespace="tdx:metro:stations",
-                                max_pages=int(args.max_pages),
-                            )
-                            _backoff_ok(st)
+                    logger.info(
+                        "Refreshing station metadata (metro=%s, bike=%s, skip_metro=%s)",
+                        metro_cities,
+                        bike_cities,
+                        skip_metro_stations,
+                    )
+                    if not skip_metro_stations:
+                        try:
+                            st = backoff_states["tdx:metro:stations"]
+                            if _backoff_ready(st, now):
+                                _collect_station_dataset(
+                                    tdx=tdx,
+                                    bronze_dir=bronze_dir,
+                                    cache=cache,
+                                    use_cache=use_cache,
+                                    source="tdx",
+                                    domain="metro",
+                                    dataset="stations",
+                                    cities=metro_cities,
+                                    path_template=config.tdx.metro.stations_path_template,
+                                    cache_namespace="tdx:metro:stations",
+                                    max_pages=int(args.max_pages),
+                                )
+                                _backoff_ok(st)
+                                dm = dataset_metrics["tdx:metro:stations"]
+                                dm["ok"] = int(dm.get("ok") or 0) + 1
+                                dm["last_ok_utc"] = datetime.now(timezone.utc).isoformat()
+                            else:
+                                logger.warning(
+                                    "Skipping metro stations refresh due to backoff until %s", st.get("next_allowed_utc")
+                                )
+                        except Exception:
+                            logger.exception("Metro station refresh failed (will retry later).")
+                            _backoff_fail(backoff_states["tdx:metro:stations"], now, "error")
                             dm = dataset_metrics["tdx:metro:stations"]
-                            dm["ok"] = int(dm.get("ok") or 0) + 1
-                            dm["last_ok_utc"] = datetime.now(timezone.utc).isoformat()
-                        else:
-                            logger.warning("Skipping metro stations refresh due to backoff until %s", st.get("next_allowed_utc"))
-                    except Exception:
-                        logger.exception("Metro station refresh failed (will retry later).")
-                        _backoff_fail(backoff_states["tdx:metro:stations"], now, "error")
-                        dm = dataset_metrics["tdx:metro:stations"]
-                        dm["error"] = int(dm.get("error") or 0) + 1
-                        dm["last_error_utc"] = datetime.now(timezone.utc).isoformat()
+                            dm["error"] = int(dm.get("error") or 0) + 1
+                            dm["last_error_utc"] = datetime.now(timezone.utc).isoformat()
+                    else:
+                        logger.info(
+                            "Skipping metro stations refresh (TDX_SKIP_METRO_STATIONS=true or external metro CSV present at %s).",
+                            external_metro_path,
+                        )
 
                     try:
                         st = backoff_states["tdx:bike:stations"]

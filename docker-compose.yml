@@ -43,6 +43,7 @@ services:
       # Conservative defaults for long-running local ops:
       - TDX_MIN_REQUEST_INTERVAL_S=0.6
       - TDX_REQUEST_JITTER_S=0.2
+      - TDX_SKIP_METRO_STATIONS=true
       - BUILD_SILVER_WRITE_SQLITE=true
       - BRONZE_RETAIN_AVAIL_FILES_PER_CITY=288
       - BRONZE_RETAIN_AVAIL_DAYS=2
