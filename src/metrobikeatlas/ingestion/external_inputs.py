@@ -154,6 +154,19 @@ def load_external_weather_hourly_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(Path(path), dtype={"city": str})
     df.columns = [str(c).strip() for c in df.columns]
 
+    # Allow common column synonyms so users can drop in datasets without rewriting.
+    rename: dict[str, str] = {}
+    if "ts" not in df.columns and "timestamp" in df.columns:
+        rename["timestamp"] = "ts"
+    if "temp_c" not in df.columns and "temperature_c" in df.columns:
+        rename["temperature_c"] = "temp_c"
+    if "precip_mm" not in df.columns and "rain_mm" in df.columns:
+        rename["rain_mm"] = "precip_mm"
+    if "humidity_pct" not in df.columns and "humidity" in df.columns:
+        rename["humidity"] = "humidity_pct"
+    if rename:
+        df = df.rename(columns=rename)
+
     required = {"ts", "city", "temp_c", "precip_mm"}
     missing = required - set(df.columns)
     if missing:
