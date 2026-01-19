@@ -81,3 +81,34 @@ services:
       interval: 30s
       timeout: 5s
       retries: 10
+
+  scheduler:
+    build: .
+    container_name: metrobikeatlas-scheduler
+    init: true
+    env_file:
+      - .env
+    environment:
+      - METROBIKEATLAS_DEMO_MODE=false
+      - METROBIKEATLAS_STORAGE=sqlite
+      # Scheduler intervals (seconds)
+      - SCHEDULER_TICK_SECONDS=30
+      - SCHEDULER_DQ_INTERVAL_SECONDS=1800
+      - SCHEDULER_GOLD_INTERVAL_SECONDS=1800
+      - SCHEDULER_ARCHIVE_INTERVAL_SECONDS=86400
+      - ARCHIVE_BRONZE_OLDER_THAN_DAYS=30
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    command: ["python", "scripts/scheduler_loop.py", "--repo-root", "/app"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      api:
+        condition: service_healthy
