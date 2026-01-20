@@ -46,6 +46,8 @@
       </div>
     </div>
 
+    <div class="action-drawer" id="actionDrawer" aria-live="polite" aria-label="Action results"></div>
+
     <main class="workspace" id="workspace">
       <aside class="sidebar left" id="leftPanel">
         <div class="sidebar-scroll">
@@ -197,10 +199,12 @@
                 <input id="toggleHeat" type="checkbox" />
                 <span>bike availability heat</span>
               </label>
+              <div class="hint">Heat：顏色代表目前指標強弱（由 heat metric 決定）。</div>
               <label class="checkbox">
                 <input id="toggleRainMode" type="checkbox" />
                 <span>rain mode</span>
               </label>
+              <div class="hint">Rain mode：下雨時自動切到更容易看出「風險站」的視角。</div>
               <label class="checkbox">
                 <input id="toggleBuffer" type="checkbox" />
                 <span>buffer circle</span>
@@ -243,6 +247,21 @@
                 <input id="toggleProblemStations" type="checkbox" />
                 <span>focus problem stations</span>
               </label>
+              <div class="grid2">
+                <div class="field">
+                  <label class="label" for="problemModeSelect">Mode</label>
+                  <select id="problemModeSelect" class="select">
+                    <option value="shortage">shortage (low availability)</option>
+                    <option value="pressure">pressure (high rent_proxy)</option>
+                    <option value="rainy_risk">rainy-risk (now)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="label" for="problemTopN">Top N</label>
+                  <input id="problemTopN" class="input input-number" type="number" min="1" max="50" step="1" />
+                </div>
+              </div>
+              <div class="hint">Focus：只高亮 Top N，其餘淡化，方便「一眼懂」。</div>
             </details>
 
             <details class="details nested">
@@ -278,6 +297,7 @@
           </div>
           <div class="legend-meta mono" id="heatMeta"></div>
         </div>
+        <div class="map-legend map-legend-fixed" id="mapLegend" aria-label="Map legend"></div>
         <div class="scene-hud" id="sceneHud">
           <div class="hud-line" id="hudStation">No station selected</div>
           <div class="hud-line mono" id="hudParams"></div>
@@ -384,6 +404,10 @@
             </div>
 
             <div class="health-cards" id="healthCards"></div>
+            <div class="status-block">
+              <div class="hint">One-line diagnosis</div>
+              <div class="mono" id="statusDiagnosis">—</div>
+            </div>
 
             <div id="statusAlerts" class="status-alerts"></div>
 

@@ -334,6 +334,14 @@ function formatAge(seconds) {
   return `${d}d`;
 }
 
+function stationShortName(name) {
+  const s = String(name || "").trim();
+  if (!s) return "MRT";
+  // If Chinese, keep first 2 chars; otherwise keep first 8 chars.
+  if (/[\u4e00-\u9fff]/.test(s)) return s.slice(0, 2);
+  return s.length <= 8 ? s : `${s.slice(0, 8)}…`;
+}
+
 function setHealthCards(status) {
   const root = document.getElementById("healthCards");
   if (!root) return;
@@ -434,6 +442,25 @@ function setStatusPanel(payload) {
   }
 
   setHealthCards(payload);
+
+  try {
+    const h = payload?.health ?? {};
+    const parts = [];
+    parts.push(`collector ${h.collector_running ? "running" : "stopped"}`);
+    parts.push(`bronze ${formatAge(h.bronze_bike_availability_age_s)}`);
+    parts.push(
+      `silver ${formatAge(Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity)))}`
+    );
+    const ws = window.__mba_state?.weatherSummary ?? null;
+    if (ws && typeof ws === "object") {
+      parts.push(`weather ${ws.stale ? "stale" : "ok"} ${formatAge(ws.heartbeat_age_s)}`);
+    } else {
+      parts.push("weather —");
+    }
+    document.getElementById("statusDiagnosis").textContent = parts.join(" · ");
+  } catch {
+    document.getElementById("statusDiagnosis").textContent = "—";
+  }
 
   renderStatusRows(document.getElementById("statusSilverTables"), payload?.silver_tables ?? []);
   renderStatusRows(document.getElementById("statusBronzeDatasets"), payload?.bronze_datasets ?? []);
@@ -797,6 +824,8 @@ function defaultSettingsFromConfig(cfg) {
     heat_ts_index: -1,
     heat_follow_latest: true,
     problem_focus: false,
+    problem_mode: "shortage",
+    problem_top_n: 10,
     rain_mode: false,
     show_buffer: true,
     show_links: false,
@@ -877,6 +906,37 @@ function updateHud({ station, settings }) {
 
 function setStatusText(text) {
   document.getElementById("statusText").textContent = text;
+}
+
+function pushAction({ level = "ok", title = "", message = "", actions = [] } = {}) {
+  const root = document.getElementById("actionDrawer");
+  if (!root) return;
+  const el = document.createElement("div");
+  const tone = ["ok", "warn", "bad"].includes(level) ? level : "ok";
+  el.className = `action-toast ${tone}`;
+  el.innerHTML = `
+    <div class="action-toast-title">${title || "Action"}</div>
+    <div class="action-toast-body">${message || ""}</div>
+    <div class="action-toast-actions"></div>
+  `;
+  const actionsEl = el.querySelector(".action-toast-actions");
+  for (const a of actions ?? []) {
+    const b = document.createElement("button");
+    b.className = `btn ${a.primary ? "btn-primary" : ""}`;
+    b.textContent = a.label || "OK";
+    b.addEventListener("click", () => {
+      try {
+        a.onClick?.();
+      } finally {
+        el.remove();
+      }
+    });
+    actionsEl.appendChild(b);
+  }
+  root.prepend(el);
+  // Keep it compact.
+  while (root.childElementCount > 4) root.lastElementChild?.remove?.();
+  setTimeout(() => el.remove(), 7000);
 }
 
 function updateStationMeta(station) {
@@ -1684,6 +1744,8 @@ async function main() {
     rainRisk: null,
     weatherSummary: null,
   };
+  // Allow small UI helpers outside `main()` (e.g. status panel) to read current meta.
+  window.__mba_state = state;
 
   // Apply permalink hash overrides (if present).
   const hash = parseHashParams();
@@ -1919,6 +1981,7 @@ async function main() {
   let bufferCircle = null;
   const heatLegend = document.getElementById("heatLegend");
   const heatMeta = document.getElementById("heatMeta");
+  const mapLegend = document.getElementById("mapLegend");
 
   function setOverlayVisible(visible, text) {
     const el = document.getElementById("loadingOverlay");
@@ -1934,6 +1997,22 @@ async function main() {
     const t = clamp(v / maxV, 0, 1);
     const hue = 220 - 220 * t; // blue -> red
     return `hsl(${hue}, 90%, 55%)`;
+  }
+
+  const heatCache = new Map(); // key: ts|metric|agg => Map(station_id -> value)
+
+  function cacheKey(ts, metric, agg) {
+    return `${String(ts)}|${String(metric)}|${String(agg)}`;
+  }
+
+  async function ensureHeatMetric(ts, metric, agg) {
+    const key = cacheKey(ts, metric, agg);
+    if (heatCache.has(key)) return heatCache.get(key);
+    const payload = await fetchJson(`/stations/heat_at2${qs({ ts, metric, agg })}`);
+    const m = new Map();
+    for (const row of payload?.points ?? []) m.set(row.station_id, row.value);
+    heatCache.set(key, m);
+    return m;
   }
 
   async function refreshHeatIndex() {
@@ -1974,7 +2053,55 @@ async function main() {
     for (const row of payload?.points ?? []) {
       state.heatByStation.set(row.station_id, row.value);
     }
+    heatCache.set(cacheKey(ts, state.settings.heat_metric, state.settings.heat_agg), new Map(state.heatByStation));
     applyHeatToMarkers();
+  }
+
+  function updateMapLegend({ showHeat, maxVal } = {}) {
+    if (!mapLegend) return;
+    const show = Boolean(showHeat);
+    const metric = String(state.settings.heat_metric || "available");
+    const agg = String(state.settings.heat_agg || "sum");
+    const focus = Boolean(state.settings.problem_focus);
+    const mode = String(state.settings.problem_mode || "shortage");
+    const topN = Number(state.settings.problem_top_n) || 10;
+    const rainyNow = Boolean(state.weatherSummary?.is_rainy_now);
+    const rainMode = Boolean(state.settings.rain_mode);
+    const tsIdx = Number(state.settings.heat_ts_index);
+    const ts = state.heatIndex?.[tsIdx] ?? null;
+    const updated = ts ? fmtTs(ts) : "—";
+    const maxTxt = maxVal == null ? "—" : String(Math.round(Number(maxVal) || 0));
+
+    const headline = show ? `Heat · ${metric} · ${agg}` : "Stations";
+    const focusTxt =
+      focus ? `Focus: ${mode} · Top ${topN}` : "Tip: enable Heat or Focus for highlights.";
+    const rainTxt = rainMode ? (rainyNow ? "Rain mode: ON (raining now)" : "Rain mode: ON") : "Rain mode: OFF";
+
+    mapLegend.innerHTML = `
+      <div class="legend-kicker">Map legend</div>
+      <div class="legend-headline">${headline}</div>
+      <div class="legend-row">
+        <span class="legend-swatch" style="background: rgba(37,99,235,0.20);"></span>
+        <div class="legend-text">Click a marker to select a MRT station (then use side panels).</div>
+      </div>
+      <div class="legend-row">
+        <span class="legend-swatch" style="background: rgba(15,23,42,0.06);"></span>
+        <div class="legend-text">${focusTxt}</div>
+      </div>
+      <div class="legend-row">
+        <span class="legend-swatch" style="background: rgba(22,163,74,0.16);"></span>
+        <div class="legend-text">${rainTxt}</div>
+      </div>
+      <div class="legend-footnote mono">Heat ts: ${updated} · scale max: ${maxTxt}</div>
+    `;
+  }
+
+  function markerLabel({ station, value, showValue }) {
+    const name = stationShortName(station?.name);
+    if (!showValue) return name;
+    const v = Number(value);
+    const valTxt = Number.isFinite(v) ? String(Math.round(v)) : "—";
+    return `${name} ${valTxt}`;
   }
 
   function applyHeatToMarkers() {
@@ -1985,8 +2112,13 @@ async function main() {
         const marker = state.metroMarkerById?.get?.(s.id);
         if (!marker) continue;
         const c = clusterColor(s.cluster);
-        marker.setStyle({ color: c, fillColor: c });
+        const selected = s.id === state.selectedStationId;
+        marker.setStyle({ color: c, fillColor: c, fillOpacity: 0.9, opacity: 1.0, weight: selected ? 5 : 2, radius: selected ? 9 : 6 });
+        try {
+          marker.setTooltipContent(markerLabel({ station: s, value: null, showValue: false }));
+        } catch {}
       }
+      updateMapLegend({ showHeat: false, maxVal: null });
       return;
     }
     const legendTitle = heatLegend.querySelector(".legend-title");
@@ -1999,8 +2131,39 @@ async function main() {
     const vals = Array.from(state.heatByStation.values()).map((v) => Number(v)).filter((v) => Number.isFinite(v));
     const focus = Boolean(state.settings.problem_focus);
     const metric = String(state.settings.heat_metric || "available");
-    const hi = focus ? quantile(vals, 0.85) : null;
-    const lo = focus ? quantile(vals, 0.15) : null;
+    const mode = String(state.settings.problem_mode || "shortage");
+    const topN = clamp(Number(state.settings.problem_top_n) || 10, 1, 50);
+
+    let highlight = null;
+    if (focus) {
+      highlight = new Set();
+      if (mode === "rainy_risk") {
+        const ids = (state.rainRisk?.items ?? []).map((it) => it.station_id).filter(Boolean).slice(0, topN);
+        for (const id of ids) highlight.add(id);
+      } else {
+        const wantMetric = mode === "pressure" ? "rent_proxy" : "available";
+        const tsIdx = Number(document.getElementById("heatTimeRange")?.value ?? 0);
+        const ts = state.heatIndex?.[tsIdx] ?? null;
+        let map = wantMetric === metric ? state.heatByStation : (ts ? heatCache.get(cacheKey(ts, wantMetric, state.settings.heat_agg)) : null);
+        if (!map && ts) {
+          // Lazy fetch the needed metric for problem focus; then re-apply styles.
+          pushAction({ level: "warn", title: "Focus mode", message: `Loading metric ${wantMetric}…` });
+          ensureHeatMetric(ts, wantMetric, state.settings.heat_agg)
+            .then(() => applyHeatToMarkers())
+            .catch(() => {});
+        }
+        if (map) {
+          const pairs = [];
+          for (const s of state.stations) {
+            const v = Number(map.get(s.id));
+            if (!Number.isFinite(v)) continue;
+            pairs.push([s.id, v]);
+          }
+          pairs.sort((a, b) => (wantMetric === "available" ? a[1] - b[1] : b[1] - a[1]));
+          for (const [id] of pairs.slice(0, topN)) highlight.add(id);
+        }
+      }
+    }
     document.getElementById("legendMin").textContent = "0";
     document.getElementById("legendMax").textContent = String(Math.round(maxVal));
     for (const s of state.stations) {
@@ -2008,19 +2171,22 @@ async function main() {
       if (!marker) continue;
       const val = state.heatByStation.get(s.id) ?? 0;
       const c = heatColor(val, maxVal);
-      let deemphasize = false;
-      if (focus) {
-        if (metric === "available") deemphasize = lo != null && Number(val) > lo;
-        else deemphasize = hi != null && Number(val) < hi;
-      }
+      const selected = s.id === state.selectedStationId;
+      const isHot = focus && highlight != null && highlight.has(s.id);
+      const deemphasize = focus && highlight != null && !isHot;
       marker.setStyle({
         color: c,
         fillColor: c,
-        fillOpacity: deemphasize ? 0.15 : 0.9,
+        fillOpacity: deemphasize ? 0.15 : isHot ? 0.98 : 0.9,
         opacity: deemphasize ? 0.25 : 1.0,
-        weight: deemphasize ? 1 : 3,
+        weight: selected ? 6 : deemphasize ? 1 : isHot ? 4 : 3,
+        radius: selected ? 10 : deemphasize ? 5 : isHot ? 9 : 7,
       });
+      try {
+        marker.setTooltipContent(markerLabel({ station: s, value: val, showValue: !deemphasize }));
+      } catch {}
     }
+    updateMapLegend({ showHeat: true, maxVal });
   }
 
   map.on("moveend zoomend", () => {
@@ -2470,9 +2636,11 @@ async function main() {
         const res = await adminPostJson("/admin/collector/start", null);
         await refreshStatus({ quiet: true });
         setStatusText(res?.detail || "Collector started");
+        pushAction({ level: "ok", title: "Collector", message: res?.detail || "Collector started" });
         document.getElementById("adminResult").innerHTML = `<div class="mono">${res?.detail || ""}</div>`;
       } catch (e) {
         setStatusText(`Start failed: ${e.message}`);
+        pushAction({ level: "bad", title: "Collector", message: `Start failed: ${e.message}` });
       } finally {
         setOverlayVisible(false);
         setAdminBusy(false);
@@ -2488,9 +2656,11 @@ async function main() {
         const res = await adminPostJson("/admin/collector/stop", null);
         await refreshStatus({ quiet: true });
         setStatusText(res?.detail || "Collector stopped");
+        pushAction({ level: "ok", title: "Collector", message: res?.detail || "Collector stopped" });
         document.getElementById("adminResult").innerHTML = `<div class="mono">${res?.detail || ""}</div>`;
       } catch (e) {
         setStatusText(`Stop failed: ${e.message}`);
+        pushAction({ level: "bad", title: "Collector", message: `Stop failed: ${e.message}` });
       } finally {
         setOverlayVisible(false);
         setAdminBusy(false);
@@ -2519,9 +2689,11 @@ async function main() {
       await refreshJobs({ quiet: true });
       await refreshStatus({ quiet: true });
       setStatusText(res?.detail || "Silver build job started");
+      pushAction({ level: "ok", title: "Build Silver", message: res?.detail || "Silver build job started" });
       document.getElementById("adminResult").innerHTML = `<div class="mono">${res?.detail || ""} ${res?.job_id ? `job ${res.job_id}` : ""}</div>`;
     } catch (e) {
       setStatusText(`Build failed: ${e.message}`);
+      pushAction({ level: "bad", title: "Build Silver", message: `Build failed: ${e.message}` });
     } finally {
       setOverlayVisible(false);
       setAdminBusy(false);
@@ -2535,11 +2707,13 @@ async function main() {
       try {
         const res = await adminPostJson("/admin/weather/refresh", null);
         setStatusText(res?.detail || "Weather refresh requested");
+        pushAction({ level: "ok", title: "Weather", message: res?.detail || "Refresh requested" });
         document.getElementById("adminResult").innerHTML = `<div class="mono">${res?.detail || ""}</div>`;
         await refreshMeta({ quiet: true });
         await refreshWeatherInsights({ quiet: true });
       } catch (e) {
         setStatusText(`Weather refresh failed: ${e.message}`);
+        pushAction({ level: "bad", title: "Weather", message: `Refresh failed: ${e.message}` });
       } finally {
         setOverlayVisible(false);
         setAdminBusy(false);
@@ -2715,6 +2889,8 @@ async function main() {
     document.getElementById("heatAggSelect").value = state.settings.heat_agg;
     document.getElementById("toggleHeatFollowLatest").checked = Boolean(state.settings.heat_follow_latest);
     document.getElementById("toggleProblemStations").checked = Boolean(state.settings.problem_focus);
+    document.getElementById("problemModeSelect").value = String(state.settings.problem_mode || "shortage");
+    document.getElementById("problemTopN").value = String(Number(state.settings.problem_top_n) || 10);
     document.getElementById("toggleBuffer").checked = Boolean(state.settings.show_buffer);
     document.getElementById("toggleLinks").checked = Boolean(state.settings.show_links);
     document.getElementById("toggleLive").checked = Boolean(state.settings.live);
@@ -2729,12 +2905,21 @@ async function main() {
     storeJson("metrobikeatlas.settings.v1", state.settings);
   }
 
-function setSetting(key, value) {
-  state.settings[key] = value;
-  persistSettings();
-  updateHud({ station: state.stationById.get(state.selectedStationId), settings: state.settings });
-  setHashParams(buildPermalinkState(state));
-}
+  function setSetting(key, value) {
+    state.settings[key] = value;
+    persistSettings();
+    updateHud({ station: state.stationById.get(state.selectedStationId), settings: state.settings });
+    setHashParams(buildPermalinkState(state));
+    if (key === "heat_metric" || key === "heat_agg" || key === "show_bike_heat") {
+      pushAction({ level: "ok", title: "Map updated", message: `Heat: ${state.settings.heat_metric} · ${state.settings.heat_agg}` });
+    }
+    if (key === "rain_mode") {
+      pushAction({ level: "ok", title: "Rain mode", message: state.settings.rain_mode ? "Enabled" : "Disabled" });
+    }
+    if (key === "problem_focus") {
+      pushAction({ level: "ok", title: "Focus mode", message: state.settings.problem_focus ? "Enabled" : "Disabled" });
+    }
+  }
 
   function clearLiveTimer() {
     if (state.liveTimer) clearInterval(state.liveTimer);
@@ -2773,10 +2958,15 @@ function setSetting(key, value) {
 
     const maxLines = 30;
     for (const [i, b] of (nearby ?? []).entries()) {
+      const d = Number(b.distance_m) || 0;
+      const t = clamp(d / 800, 0, 1);
+      const hue = 140 - 80 * t; // green -> yellow/orange
+      const color = `hsla(${hue}, 85%, 45%, 0.95)`;
+      const fill = `hsla(${hue}, 85%, 55%, 0.35)`;
       const m = L.circleMarker([b.lat, b.lon], {
         radius: 5,
-        color: "rgba(219,181,42,0.95)",
-        fillColor: "rgba(219,181,42,0.35)",
+        color,
+        fillColor: fill,
         fillOpacity: 0.9,
         weight: 2,
       });
@@ -2789,7 +2979,7 @@ function setSetting(key, value) {
             [station.lat, station.lon],
             [b.lat, b.lon],
           ],
-          { color: "rgba(255,255,255,0.22)", weight: 1 }
+          { color: "rgba(37,99,235,0.35)", weight: 2 }
         ).addTo(linkLayer);
       }
     }
@@ -2803,6 +2993,7 @@ function setSetting(key, value) {
 
     updateStationMeta(station);
     updateHud({ station, settings: state.settings });
+    pushAction({ level: "ok", title: "Station selected", message: `${station.name} · ${station.id}` });
 
     if (focus) map.setView([station.lat, station.lon], Math.max(map.getZoom(), 13));
 
@@ -2818,6 +3009,7 @@ function setSetting(key, value) {
 
     setBufferCircle(station);
     setHashParams(buildPermalinkState(state));
+    applyHeatToMarkers();
   }
 
   async function refreshSelectedStation({ reason = "refresh" } = {}) {
@@ -2968,6 +3160,13 @@ function setSetting(key, value) {
       fillOpacity: 0.9,
       weight: 2,
       station_id: s.id,
+    });
+    marker.bindTooltip(stationShortName(s.name), {
+      permanent: true,
+      direction: "center",
+      className: "station-label",
+      opacity: 1.0,
+      interactive: false,
     });
     marker.on("click", () => {
       selectStationById(s.id, { focus: true });
@@ -3186,6 +3385,43 @@ function setSetting(key, value) {
   });
   document.getElementById("toggleProblemStations").addEventListener("change", (e) => {
     setSetting("problem_focus", Boolean(e.target.checked));
+    if (Boolean(e.target.checked) && !state.settings.show_bike_heat) {
+      // Focus needs station-wide values; enable heat automatically.
+      const mode = String(state.settings.problem_mode || "shortage");
+      if (mode === "pressure") setSetting("heat_metric", "rent_proxy");
+      if (mode === "shortage") setSetting("heat_metric", "available");
+      setSetting("show_bike_heat", true);
+      refreshHeatIndex()
+        .then(() => refreshHeatAtIndex(document.getElementById("heatTimeRange").value))
+        .catch(() => applyHeatToMarkers());
+      return;
+    }
+    applyHeatToMarkers();
+  });
+  document.getElementById("problemModeSelect").addEventListener("change", async (e) => {
+    setSetting("problem_mode", e.target.value);
+    if (state.settings.problem_focus) {
+      if (state.settings.problem_mode === "pressure") setSetting("heat_metric", "rent_proxy");
+      if (state.settings.problem_mode === "shortage") setSetting("heat_metric", "available");
+    }
+    // If focus depends on a metric not currently loaded, prefetch it.
+    try {
+      const tsIdx = Number(document.getElementById("heatTimeRange")?.value ?? 0);
+      const ts = state.heatIndex?.[tsIdx] ?? null;
+      if (ts) {
+        const mode = String(state.settings.problem_mode || "shortage");
+        const wantMetric = mode === "pressure" ? "rent_proxy" : mode === "shortage" ? "available" : null;
+        if (wantMetric && !heatCache.get(cacheKey(ts, wantMetric, state.settings.heat_agg))) {
+          await ensureHeatMetric(ts, wantMetric, state.settings.heat_agg);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    applyHeatToMarkers();
+  });
+  document.getElementById("problemTopN").addEventListener("change", (e) => {
+    setSetting("problem_top_n", Number(e.target.value) || 10);
     applyHeatToMarkers();
   });
 
