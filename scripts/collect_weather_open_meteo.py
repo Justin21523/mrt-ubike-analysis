@@ -113,6 +113,29 @@ def _once(
     merged = _retain_window(merged, retain_days=retain_days)
     merged = _dedupe_sort(merged)
 
+    # Derive a compact summary for UI/meta without reading the whole CSV downstream.
+    ts_dt = pd.to_datetime(merged["ts"], utc=True, errors="coerce") if not merged.empty else pd.Series([], dtype="datetime64[ns, UTC]")
+    now_dt = datetime.now(timezone.utc)
+    observed = merged.loc[ts_dt <= now_dt].copy() if not merged.empty else merged
+    if not observed.empty:
+        obs_ts = pd.to_datetime(observed["ts"], utc=True, errors="coerce")
+        obs_ts = obs_ts.dropna()
+        min_ts = obs_ts.min()
+        max_ts = obs_ts.max()
+        latest_row = None
+        if max_ts is not pd.NaT:
+            latest_row = observed.loc[pd.to_datetime(observed["ts"], utc=True, errors="coerce") == max_ts].tail(1)
+        latest_precip = None
+        if latest_row is not None and not latest_row.empty:
+            try:
+                latest_precip = float(latest_row["precip_mm"].iloc[0])
+            except Exception:
+                latest_precip = None
+    else:
+        min_ts = None
+        max_ts = None
+        latest_precip = None
+
     issues = validate_external_weather_hourly_df(merged)
     errors = [i for i in issues if i.level == "error"]
     if errors:
@@ -134,6 +157,12 @@ def _once(
             "past_days": int(past_days),
             "retain_days": None if not retain_days else int(retain_days),
             "rows": int(len(merged)),
+            "coverage": {
+                "min_ts_utc": None if min_ts is None else min_ts.to_pydatetime().isoformat().replace("+00:00", "Z"),
+                "max_ts_utc": None if max_ts is None else max_ts.to_pydatetime().isoformat().replace("+00:00", "Z"),
+                "latest_observed_precip_mm": latest_precip,
+                "is_rainy_now": bool(latest_precip is not None and latest_precip > 0.0),
+            },
             "duration_s": float(duration_s),
             "out_path": str(out_path),
             "ok": True,
@@ -162,13 +191,33 @@ def main() -> int:
 
     repo_root = PROJECT_ROOT
     heartbeat_path = repo_root / "logs" / "weather_heartbeat.json"
+    refresh_path = repo_root / "logs" / "weather_refresh_request.json"
 
     out_path = Path(args.out)
     interval_s = max(int(args.interval_seconds), 60)
     retain_days = int(args.retain_days) if int(args.retain_days) > 0 else None
 
     last_error: str | None = None
+    last_refresh_handled_utc: str | None = None
+    next_run_at = time.time()
     while True:
+        # Refresh requests: a local admin can ask the collector to run immediately without restarting containers.
+        force_now = False
+        if refresh_path.exists():
+            try:
+                req = json.loads(refresh_path.read_text(encoding="utf-8"))
+                ts = str(req.get("ts_utc") or "") or None
+                if ts and ts != last_refresh_handled_utc:
+                    last_refresh_handled_utc = ts
+                    force_now = True
+            except Exception:
+                pass
+
+        now_s = time.time()
+        if not force_now and now_s < next_run_at:
+            time.sleep(float(min(5.0, max(next_run_at - now_s, 0.1))))
+            continue
+
         try:
             _once(
                 out_path=out_path,
@@ -195,9 +244,9 @@ def main() -> int:
                 },
             )
 
-        time.sleep(float(interval_s))
+        # Next scheduled run.
+        next_run_at = time.time() + float(interval_s)
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
