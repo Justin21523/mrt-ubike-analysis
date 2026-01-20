@@ -32,37 +32,7 @@
     </header>
 
     <main class="page">
-      <section class="panel" aria-label="Operations">
-        <div class="section-title">Data Status</div>
-        <div class="row row-actions">
-          <button class="btn btn-primary" id="btnRefreshStatus">Refresh</button>
-          <button class="btn" id="btnStartCollector">Start collector</button>
-          <button class="btn" id="btnStopCollector">Stop collector</button>
-          <button class="btn" id="btnBuildSilver">Build Silver (async)</button>
-          <button class="btn" id="btnRefreshWeather">Refresh weather</button>
-          <span class="hint mono" id="statusUpdatedAt"></span>
-        </div>
-
-        <div class="row row-actions">
-          <input class="input" id="adminTokenInput" type="password" placeholder="Admin token (optional)" />
-          <button class="btn" id="btnSaveAdminToken">Save token</button>
-          <button class="btn" id="btnClearAdminToken">Clear</button>
-        </div>
-
-        <div class="health-cards" id="healthCards"></div>
-        <div class="status-block" id="opsAlerts"></div>
-
-        <div class="section-subtitle">Jobs</div>
-        <div class="status-block" id="jobCenter">Loading…</div>
-
-        <div class="section-subtitle">External inputs</div>
-        <div class="status-block" id="externalMetro">Loading…</div>
-        <div class="status-block" id="externalCalendar" style="margin-top:10px;">Loading…</div>
-        <div class="status-block" id="externalWeather" style="margin-top:10px;">Loading…</div>
-
-        <div class="section-subtitle">Admin result</div>
-        <div class="status-block" id="adminResult"></div>
-      </section>
+      <div class="cards" id="opsCards"></div>
     </main>
 
     <div class="overlay hidden" id="loadingOverlay" aria-hidden="true" hidden>
@@ -77,6 +47,7 @@
       <div class="status-actions"></div>
     </footer>
 
-    <script src="/static/ops.js?v=20260120-3"></script>
+    <script src="/static/page_common.js?v=20260120-4"></script>
+    <script src="/static/ops.js?v=20260120-4"></script>
   </body>
 </html>

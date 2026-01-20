@@ -32,39 +32,7 @@
     </header>
 
     <main class="page">
-      <section class="briefing" aria-label="Home briefing">
-        <div class="briefing-header">
-          <div>
-            <div class="briefing-kicker">Service Design · Public Policy Brief</div>
-            <div class="briefing-title">Executive Summary</div>
-            <div class="briefing-subtitle">一眼看懂資料狀態與今日洞察</div>
-          </div>
-          <div class="briefing-actions">
-            <a class="btn btn-primary" href="/explorer">Open Explorer</a>
-            <a class="btn" href="/ops">Open Ops</a>
-          </div>
-        </div>
-
-        <div class="briefing-kpis" id="homeKpis"></div>
-
-        <div class="briefing-card">
-          <div class="briefing-card-title">Today</div>
-          <div class="briefing-body" id="homeConclusion">Loading…</div>
-        </div>
-
-        <div class="briefing-cards">
-          <div class="briefing-card">
-            <div class="briefing-card-title">Story card · Rain × Usage</div>
-            <div class="briefing-body" id="homeRainUsage">Loading…</div>
-          </div>
-          <div class="briefing-card">
-            <div class="briefing-card-title">Story card · Rain risk stations</div>
-            <div class="briefing-body" id="homeRainRisk">Loading…</div>
-          </div>
-        </div>
-
-        <div class="briefing-callouts" id="homeCallouts"></div>
-      </section>
+      <div class="cards" id="homeCards"></div>
     </main>
 
     <footer class="statusbar">
@@ -72,6 +40,7 @@
       <div class="status-actions"></div>
     </footer>
 
-    <script src="/static/home.js?v=20260120-3"></script>
+    <script src="/static/page_common.js?v=20260120-4"></script>
+    <script src="/static/home.js?v=20260120-4"></script>
   </body>
 </html>

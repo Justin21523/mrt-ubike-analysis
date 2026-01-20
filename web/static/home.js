@@ -1,200 +1,274 @@
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
-  return await res.json();
-}
+const MBA = window.MBA;
 
-function fmtAge(seconds) {
-  const s = Number(seconds);
-  if (!Number.isFinite(s)) return "—";
-  if (s < 60) return `${Math.round(s)}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
-  return `${(s / 86400).toFixed(1)}d`;
-}
-
-function setModePill(demoMode) {
-  const el = document.getElementById("modePill");
-  if (!el) return;
-  el.textContent = demoMode ? "Demo mode" : "Real data mode";
-  el.classList.remove("ok", "warn", "bad");
-  el.classList.add(demoMode ? "warn" : "ok");
-}
-
-function setWeatherPill(meta) {
-  const el = document.getElementById("weatherPill");
-  if (!el) return;
-  el.classList.remove("ok", "warn", "bad");
+function oneSentence(status, meta) {
+  const h = status?.health ?? {};
   const w = meta?.meta?.external?.weather_collector ?? null;
-  if (!w) {
-    el.textContent = "Weather: unavailable";
-    el.classList.add("warn");
-    return;
+  const parts = [];
+  parts.push(status?.demo_mode ? "Demo mode" : "Real mode");
+  parts.push(`Bronze ${MBA.fmtAge(h.bronze_bike_availability_age_s)}`);
+  parts.push(
+    `Silver ${MBA.fmtAge(Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity)))}`
+  );
+  if (w) parts.push(`Weather ${w.stale ? "stale" : "ok"} (${MBA.fmtAge(w.heartbeat_age_s)})${w.is_rainy_now ? " · raining now" : ""}`);
+  if (Number(h.metro_tdx_404_count || 0)) parts.push(`Metro 404 ×${h.metro_tdx_404_count}`);
+  return parts.join(" · ");
+}
+
+function buildCredibilityCard(status, meta) {
+  const w = meta?.meta?.external?.weather_collector ?? null;
+  const resolved = meta?.meta ?? {};
+  const badge = {
+    tone: status?.demo_mode ? "warn" : "ok",
+    text: status?.demo_mode ? "demo" : "real",
+  };
+  const { card, body } = MBA.createCard({
+    tone: "meta",
+    kicker: "Data Credibility",
+    title: "Sources · freshness · traceability",
+    badge,
+    right: `<span class="mono">build ${MBA.shortId(resolved.silver_build_id || meta?.silver_build_meta?.build_id)}</span>`,
+    actions: [
+      {
+        label: "Download JSON",
+        onClick: () => MBA.downloadJson(`metrobikeatlas-meta-${new Date().toISOString()}.json`, { status, meta }),
+      },
+      {
+        label: "Copy summary",
+        onClick: async () => {
+          await MBA.copyText(oneSentence(status, meta));
+          MBA.setStatusText("Copied");
+        },
+      },
+      { type: "link", label: "Open Ops", href: "/ops", primary: true },
+    ],
+  });
+  const lines = [];
+  lines.push(`<div class="hint">Storage: <span class="mono">${resolved.fallback_source || "—"}</span></div>`);
+  lines.push(
+    `<div class="hint">Silver build: <span class="mono">${MBA.shortId(resolved.silver_build_id)}</span> · hash <span class="mono">${MBA.shortId(resolved.inputs_hash, 10)}</span></div>`
+  );
+  if (w) {
+    lines.push(
+      `<div class="hint">Weather: <span class="mono">${w.stale ? "stale" : "ok"}</span> · age <span class="mono">${MBA.fmtAge(w.heartbeat_age_s)}</span>${w.is_rainy_now ? " · raining now" : ""}</div>`
+    );
   }
-  el.textContent = `Weather: ${w.stale ? "stale" : "ok"} (${fmtAge(w.heartbeat_age_s)})${w.is_rainy_now ? " · rain" : ""}`;
-  el.classList.add(w.stale ? "warn" : "ok");
+  body.innerHTML = lines.join("");
+  return card;
 }
 
-function setStatusText(text) {
-  const el = document.getElementById("statusText");
-  if (el) el.textContent = text;
-}
-
-function kpiCard({ label, value, tone, meta }) {
-  const el = document.createElement("div");
-  el.className = `briefing-kpi ${tone || ""}`;
-  el.innerHTML = `
-    <div class="briefing-kpi-label">${label}</div>
-    <div class="briefing-kpi-value">${value}</div>
-    <div class="briefing-kpi-meta mono">${meta || ""}</div>
+function buildStoryParagraphCard() {
+  const { card, body } = MBA.createCard({
+    tone: "meta",
+    kicker: "Story Structure",
+    title: "Problem → Evidence → Implication → Action",
+    badge: { tone: "muted", text: "guide" },
+  });
+  body.innerHTML = `
+    <div><span class="mono">Problem</span> · 哪些 MRT 站附近共享單車供需失衡？</div>
+    <div><span class="mono">Evidence</span> · 用 heat snapshot + 時間序列展示尖峰。</div>
+    <div><span class="mono">Implication</span> · 影響轉乘體驗與營運調度成本。</div>
+    <div><span class="mono">Action</span> · 選 Top N 問題站，提出 2–4 個策略選項。</div>
   `;
-  return el;
+  return card;
 }
 
-function linkToExplorer(stationId) {
-  const a = document.createElement("a");
-  a.className = "btn btn-primary";
-  a.href = `/explorer#station_id=${encodeURIComponent(String(stationId))}`;
-  a.textContent = "Open in Explorer";
-  return a;
+function buildKpisCard(status) {
+  const h = status?.health ?? {};
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Key Indicators",
+    title: "Operational KPIs",
+    badge: { tone: "ok", text: "live" },
+    actions: [
+      { type: "link", label: "Go to Ops", href: "/ops", primary: true },
+      { type: "link", label: "Open Explorer", href: "/explorer" },
+    ],
+  });
+  body.innerHTML = `
+    <div class="health-cards">
+      <div class="health-card">
+        <div class="health-title">Collector</div>
+        <div class="health-value">${h.collector_running ? "running" : "stopped"}</div>
+        <div class="health-meta mono">${h.collector_last_ok_utc || ""}</div>
+      </div>
+      <div class="health-card">
+        <div class="health-title">Bronze freshness</div>
+        <div class="health-value">${MBA.fmtAge(h.bronze_bike_availability_age_s)}</div>
+        <div class="health-meta mono">${h.bronze_bike_availability_last_utc || ""}</div>
+      </div>
+      <div class="health-card">
+        <div class="health-title">Silver freshness</div>
+        <div class="health-value">${MBA.fmtAge(
+          Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity))
+        )}</div>
+        <div class="health-meta mono">links/bike_timeseries</div>
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+function buildTodayCard(status, meta) {
+  const conclusion = oneSentence(status, meta);
+  const { card, body } = MBA.createCard({
+    tone: "primary",
+    kicker: "Executive Summary",
+    title: "Today (one sentence)",
+    badge: { tone: "ok", text: "brief" },
+    actions: [
+      { type: "link", label: "Open Explorer", href: "/explorer", primary: true },
+      {
+        label: "Copy",
+        onClick: async () => {
+          await MBA.copyText(conclusion);
+          MBA.setStatusText("Copied");
+        },
+      },
+    ],
+  });
+  body.textContent = conclusion;
+  return card;
+}
+
+function buildStoryProblemCard({ status, meta, usage }) {
+  const city = usage?.city || status?.tdx?.bike_cities?.[0] || "Taipei";
+  const rainy = Number(usage?.precip_total_mm ?? 0) > 0;
+  const p = Number(usage?.precip_total_mm);
+  const msg =
+    usage && usage.precip_total_mm != null
+      ? `${city} · ${rainy ? `rain ${p.toFixed(1)}mm` : "no rain"} · rent_proxy ${Math.round(Number(usage.rent_proxy_total ?? 0))} · return_proxy ${Math.round(
+          Number(usage.return_proxy_total ?? 0)
+        )}`
+      : "Weather usage insight not available yet.";
+
+  const heatParams = rainy ? { show_bike_heat: 1, heat_metric: "rent_proxy", heat_agg: "sum" } : { show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" };
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Story Card · Evidence",
+    title: "Rain × Usage (24h)",
+    badge: { tone: rainy ? "warn" : "ok", text: rainy ? "rain" : "clear" },
+    actions: [
+      { type: "link", label: "Open Explorer (heat)", href: MBA.explorerHref(heatParams), primary: true },
+      {
+        label: "Download JSON",
+        onClick: () => MBA.downloadJson(`metrobikeatlas-rain-usage-${new Date().toISOString()}.json`, { status, meta, usage }),
+      },
+    ],
+  });
+  body.textContent = msg;
+  return card;
+}
+
+function buildStoryRiskCard({ status, meta, risk }) {
+  const w = meta?.meta?.external?.weather_collector ?? null;
+  const rainingNow = Boolean(w?.is_rainy_now);
+  const items = Array.isArray(risk?.items) ? risk.items.slice(0, 5) : [];
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Story Card · Actionable list",
+    title: "Rain-risk stations (now)",
+    badge: { tone: rainingNow ? "warn" : "muted", text: rainingNow ? "raining" : "not raining" },
+    actions: [
+      { type: "link", label: "Open Insights", href: "/insights", primary: true },
+      {
+        label: "Download JSON",
+        onClick: () => MBA.downloadJson(`metrobikeatlas-rain-risk-${new Date().toISOString()}.json`, { status, meta, risk }),
+      },
+    ],
+  });
+
+  if (!rainingNow) {
+    body.innerHTML = `<div class="hint">Not raining now, so this list is informational.</div>`;
+    return card;
+  }
+  if (!items.length) {
+    body.innerHTML = `<div class="hint">Raining now, but list is empty.</div>`;
+    return card;
+  }
+  const list = document.createElement("ul");
+  list.className = "list";
+  for (const it of items) {
+    const li = document.createElement("li");
+    const v = Number(it.mean_available_bikes);
+    const href = MBA.explorerHref({ station_id: it.station_id, show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" });
+    li.innerHTML = `<div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+      <div style="min-width:0;">
+        <div style="font-weight:800; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${it.name || it.station_id}</div>
+        <div class="hint mono" style="margin:2px 0 0 0;">mean_available: ${Number.isFinite(v) ? Math.round(v) : "—"}</div>
+      </div>
+      <a class="btn btn-primary" href="${href}">Open</a>
+    </div>`;
+    list.appendChild(li);
+  }
+  body.appendChild(list);
+  return card;
+}
+
+function buildNextActionsCard(status, meta) {
+  const { card, body } = MBA.createCard({
+    tone: "primary",
+    kicker: "Next",
+    title: "What to do next",
+    badge: { tone: "ok", text: "action" },
+    actions: [
+      { type: "link", label: "Start/Build (Ops)", href: "/ops", primary: true },
+      { type: "link", label: "Explore map", href: MBA.explorerHref({ show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" }) },
+      { type: "link", label: "Read methods", href: "/about" },
+    ],
+  });
+  const h = status?.health ?? {};
+  const items = [];
+  if (!h.collector_running) items.push("Collector is stopped → start collector.");
+  const silverAge = Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity));
+  if (!Number.isFinite(silverAge)) items.push("Silver missing → run Build Silver.");
+  if (Number(h.metro_tdx_404_count || 0)) items.push("Metro 404 → use external metro_stations.csv fallback (see Ops).");
+  if (!items.length) items.push("Data looks healthy → pick a station and tell the story with evidence + options.");
+  body.innerHTML = `<ol style="margin:0; padding-left:18px;">${items.map((x) => `<li>${x}</li>`).join("")}</ol>`;
+  return card;
+}
+
+function buildMethodsCard() {
+  const { card, body } = MBA.createCard({
+    tone: "meta",
+    kicker: "Methods",
+    title: "Definitions & limitations",
+    badge: { tone: "muted", text: "read" },
+    actions: [{ type: "link", label: "Open About", href: "/about", primary: true }],
+  });
+  body.innerHTML =
+    `<div class="hint">This project uses proxy signals derived from bike snapshots and city-level weather. Always validate before policy decisions.</div>`;
+  return card;
 }
 
 async function main() {
-  setStatusText("Loading…");
-  const [status, meta] = await Promise.all([fetchJson("/status"), fetchJson("/meta")]);
-  setModePill(Boolean(status?.demo_mode));
-  setWeatherPill(meta);
+  MBA.setStatusText("Loading…");
+  const root = document.getElementById("homeCards");
+  if (!root) return;
 
-  const h = status?.health ?? {};
-  const kpis = [];
-  kpis.push(
-    kpiCard({
-      label: "Collector",
-      value: h.collector_running ? "running" : "stopped",
-      tone: h.collector_running ? "ok" : "warn",
-      meta: h.collector_last_ok_utc ? `last ok ${h.collector_last_ok_utc}` : "",
-    })
-  );
-  kpis.push(
-    kpiCard({
-      label: "Bronze freshness",
-      value: fmtAge(h.bronze_bike_availability_age_s),
-      tone: h.bronze_bike_availability_age_s != null && Number(h.bronze_bike_availability_age_s) > 3600 ? "warn" : "ok",
-      meta: h.bronze_bike_availability_last_utc || "",
-    })
-  );
-  kpis.push(
-    kpiCard({
-      label: "Silver freshness",
-      value: fmtAge(
-        Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity))
-      ),
-      tone:
-        h.silver_metro_bike_links_age_s == null && h.silver_bike_timeseries_age_s == null
-          ? "warn"
-          : Math.max(Number(h.silver_metro_bike_links_age_s ?? 0), Number(h.silver_bike_timeseries_age_s ?? 0)) > 86400
-            ? "warn"
-            : "ok",
-      meta: "links/bike_timeseries",
-    })
-  );
-  if (Number(h.metro_tdx_404_count || 0) > 0) {
-    kpis.push(
-      kpiCard({
-        label: "Metro TDX 404",
-        value: String(h.metro_tdx_404_count),
-        tone: "bad",
-        meta: h.metro_tdx_404_last_utc ? `last ${h.metro_tdx_404_last_utc}` : "",
-      })
-    );
-  }
-  const kpisEl = document.getElementById("homeKpis");
-  if (kpisEl) {
-    kpisEl.innerHTML = "";
-    for (const el of kpis) kpisEl.appendChild(el);
-  }
+  const [status, meta] = await Promise.all([MBA.fetchJson("/status"), MBA.fetchJson("/meta")]);
+  MBA.setModePill(Boolean(status?.demo_mode));
+  MBA.setWeatherPill(meta);
 
-  const homeConclusion = document.getElementById("homeConclusion");
-  if (homeConclusion) {
-    const w = meta?.meta?.external?.weather_collector ?? null;
-    const pieces = [];
-    pieces.push(status?.demo_mode ? "Demo mode" : "Real mode");
-    pieces.push(`Bronze ${fmtAge(h.bronze_bike_availability_age_s)}`);
-    pieces.push(
-      `Silver ${fmtAge(Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity)))}`
-    );
-    if (w) pieces.push(`Weather ${w.stale ? "stale" : "ok"} (${fmtAge(w.heartbeat_age_s)})${w.is_rainy_now ? " · raining now" : ""}`);
-    if (Number(h.metro_tdx_404_count || 0)) pieces.push(`Metro 404 ×${h.metro_tdx_404_count}`);
-    homeConclusion.textContent = pieces.join(" · ");
-  }
-
-  // Story cards
   const city = status?.tdx?.bike_cities?.[0] ?? "Taipei";
   const [usage, risk] = await Promise.all([
-    fetchJson(`/insights/weather_usage?city=${encodeURIComponent(city)}&hours=24`).catch(() => null),
-    fetchJson(`/insights/rain_risk_now?city=${encodeURIComponent(city)}&top_k=5`).catch(() => null),
+    MBA.fetchJson(`/insights/weather_usage?city=${encodeURIComponent(city)}&hours=24`).catch(() => null),
+    MBA.fetchJson(`/insights/rain_risk_now?city=${encodeURIComponent(city)}&top_k=5`).catch(() => null),
   ]);
 
-  const rainUsage = document.getElementById("homeRainUsage");
-  if (rainUsage) {
-    if (usage?.precip_total_mm != null) {
-      rainUsage.textContent =
-        `${usage.city || city} · ` +
-        `${Number(usage.precip_total_mm) > 0 ? `rain ${Number(usage.precip_total_mm).toFixed(1)}mm` : "no rain"}` +
-        `${usage.rainy_hours != null ? ` · rainy hours ${usage.rainy_hours}` : ""}` +
-        ` · rent_proxy ${Math.round(Number(usage.rent_proxy_total ?? 0))}` +
-        ` · return_proxy ${Math.round(Number(usage.return_proxy_total ?? 0))}`;
-    } else {
-      rainUsage.textContent = "Weather usage insight not available yet.";
-    }
-  }
+  root.innerHTML = "";
+  root.appendChild(buildCredibilityCard(status, meta));
+  root.appendChild(buildKpisCard(status));
+  root.appendChild(buildTodayCard(status, meta));
+  root.appendChild(buildStoryParagraphCard());
+  root.appendChild(buildStoryProblemCard({ status, meta, usage }));
+  root.appendChild(buildStoryRiskCard({ status, meta, risk }));
+  root.appendChild(buildNextActionsCard(status, meta));
+  root.appendChild(buildMethodsCard());
 
-  const rainRisk = document.getElementById("homeRainRisk");
-  if (rainRisk) {
-    rainRisk.innerHTML = "";
-    if (risk?.is_rainy_now && Array.isArray(risk.items) && risk.items.length) {
-      const hint = document.createElement("div");
-      hint.className = "hint";
-      hint.textContent = "Raining now · Top stations by low nearby availability";
-      rainRisk.appendChild(hint);
-      const row = document.createElement("div");
-      row.className = "row row-actions";
-      for (const it of risk.items.slice(0, 5)) {
-        const b = document.createElement("a");
-        b.className = "btn";
-        b.href = `/explorer#station_id=${encodeURIComponent(String(it.station_id))}`;
-        const v = Number(it.mean_available_bikes);
-        b.textContent = `${it.name || it.station_id} · ${Number.isFinite(v) ? Math.round(v) : "—"}`;
-        row.appendChild(b);
-      }
-      rainRisk.appendChild(row);
-    } else {
-      const msg = document.createElement("div");
-      msg.className = "hint";
-      msg.textContent = (meta?.meta?.external?.weather_collector?.is_rainy_now ?? false)
-        ? "Raining now, but rain-risk list is empty."
-        : "Not raining now.";
-      rainRisk.appendChild(msg);
-    }
-  }
-
-  // Callouts (reuse /status alerts)
-  const callouts = document.getElementById("homeCallouts");
-  if (callouts) {
-    callouts.innerHTML = "";
-    for (const a of (status?.alerts ?? []).slice(0, 4)) {
-      const div = document.createElement("div");
-      div.className = `briefing-callout ${(a.level || "info").toLowerCase()}`;
-      div.innerHTML = `<div class="briefing-callout-title">${a.title || "Note"}</div><div class="briefing-callout-body">${a.message || ""}</div>`;
-      callouts.appendChild(div);
-    }
-  }
-
-  setStatusText("Ready");
+  MBA.setStatusText("Ready");
 }
 
 main().catch((e) => {
   console.error(e);
-  setStatusText(`Error: ${e.message}`);
+  MBA.setStatusText(`Error: ${e.message}`);
 });
-

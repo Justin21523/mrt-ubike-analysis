@@ -32,34 +32,7 @@
     </header>
 
     <main class="page">
-      <section class="panel" aria-label="Insights">
-        <div class="section-title">Insights</div>
-        <div class="hint">清單是簡報的「證據附件」：每筆可直接跳到 Explorer。</div>
-
-        <div class="grid2">
-          <div class="field">
-            <label class="label" for="insightsMode">Mode</label>
-            <select id="insightsMode" class="select">
-              <option value="hotspots">hotspots</option>
-              <option value="coldspots">coldspots</option>
-              <option value="shortage">shortage (low availability)</option>
-              <option value="pressure">pressure (high rent_proxy)</option>
-              <option value="rainy_risk">rainy-risk (now)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="label" for="insightsTopK">Top K</label>
-            <input id="insightsTopK" class="input input-number" type="number" min="1" max="50" step="1" value="10" />
-          </div>
-        </div>
-
-        <div class="row row-actions">
-          <button class="btn btn-primary" id="btnRefreshInsights">Refresh</button>
-          <a class="btn" href="/explorer">Open Explorer</a>
-        </div>
-
-        <div class="status-block" id="insightsList">Loading…</div>
-      </section>
+      <div class="cards" id="insightsCards"></div>
     </main>
 
     <footer class="statusbar">
@@ -67,6 +40,7 @@
       <div class="status-actions"></div>
     </footer>
 
-    <script src="/static/insights.js?v=20260120-3"></script>
+    <script src="/static/page_common.js?v=20260120-4"></script>
+    <script src="/static/insights.js?v=20260120-4"></script>
   </body>
 </html>
