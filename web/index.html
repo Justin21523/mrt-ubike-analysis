@@ -21,6 +21,7 @@
         </div>
         <div class="pill" id="modePill">Loading…</div>
         <div class="pill" id="ssePill">Live: connecting…</div>
+        <div class="pill" id="weatherPill">Weather: —</div>
       </div>
       <div class="toolbar-center">
         <div class="nav" role="tablist" aria-label="Pages">
@@ -197,6 +198,10 @@
                 <span>bike availability heat</span>
               </label>
               <label class="checkbox">
+                <input id="toggleRainMode" type="checkbox" />
+                <span>rain mode</span>
+              </label>
+              <label class="checkbox">
                 <input id="toggleBuffer" type="checkbox" />
                 <span>buffer circle</span>
               </label>
@@ -368,6 +373,7 @@
               <button class="btn" id="btnStartCollector">Start collector</button>
               <button class="btn" id="btnStopCollector">Stop collector</button>
               <button class="btn" id="btnBuildSilver">Build Silver (async)</button>
+              <button class="btn" id="btnRefreshWeather">Refresh weather</button>
               <span class="hint mono" id="statusUpdatedAt"></span>
             </div>
 

@@ -704,8 +704,10 @@ function renderExternalCsvPanel(rootId, payload, { onValidate, onUpload, onBuild
   const ok = Boolean(payload?.ok);
   const issues = payload?.issues ?? [];
   const head = payload?.head ?? [];
+  const noteHtml = payload?.note_html ? String(payload.note_html) : "";
 
   root.innerHTML = `
+    ${noteHtml ? `<div class="hint">${noteHtml}</div>` : ""}
     <div class="status-kv">
       <div class="label">Path</div>
       <div class="mono">${payload?.path ?? "—"}</div>
@@ -795,6 +797,7 @@ function defaultSettingsFromConfig(cfg) {
     heat_ts_index: -1,
     heat_follow_latest: true,
     problem_focus: false,
+    rain_mode: false,
     show_buffer: true,
     show_links: false,
     live: false,
@@ -833,6 +836,31 @@ function buildPermalinkState(state) {
 function setModePill(cfg) {
   const pill = document.getElementById("modePill");
   pill.textContent = cfg.demo_mode ? "Demo mode" : "Real data mode";
+}
+
+function setWeatherPill(metaPayload) {
+  const el = document.getElementById("weatherPill");
+  if (!el) return;
+  el.classList.remove("ok", "warn", "bad");
+
+  const summary = metaPayload?.meta?.external?.weather_collector ?? null;
+  if (!summary || typeof summary !== "object") {
+    el.classList.add("warn");
+    el.textContent = "Weather: unavailable";
+    el.title = "Weather collector heartbeat not found.";
+    return;
+  }
+
+  const stale = Boolean(summary.stale);
+  const rainy = Boolean(summary.is_rainy_now);
+  const age = summary.heartbeat_age_s;
+  const precip = summary.latest_observed_precip_mm;
+
+  el.classList.add(stale ? "bad" : "ok");
+  const ageTxt = age == null ? "—" : formatAge(age);
+  const rainTxt = rainy ? ` · rain${precip != null ? ` ${Number(precip).toFixed(1)}mm` : ""}` : "";
+  el.textContent = `Weather: ${stale ? "stale" : "ok"} · ${ageTxt}${rainTxt}`;
+  el.title = (summary.commands ?? []).join("\n") || "";
 }
 
 function updateHud({ station, settings }) {
@@ -1541,7 +1569,45 @@ function renderBriefing(status, state, { onboarding } = {}) {
       });
     }
   }
-  const allCallouts = [...effects, ...alerts].slice(0, 3);
+  const weatherCards = [];
+  const ws = state?.weatherSummary ?? null;
+  if (ws?.stale) {
+    weatherCards.push({
+      level: "warning",
+      title: "Weather stale",
+      message: `Weather data is stale (age ${formatAge(ws.heartbeat_age_s)}).`,
+      commands: (ws.commands ?? ["docker compose up -d weather"]).slice(0, 1),
+    });
+  }
+
+  const usage = state?.weatherUsage ?? null;
+  if (usage && usage.precip_total_mm != null && usage.rent_proxy_total != null) {
+    const p = Number(usage.precip_total_mm);
+    const r = Number(usage.rent_proxy_total);
+    const ret2 = Number(usage.return_proxy_total);
+    const rainyHours = usage.rainy_hours;
+    weatherCards.push({
+      level: p > 0 ? "info" : "info",
+      title: "最近 24h · 降雨 × 借還 proxy",
+      message:
+        `${p > 0 ? `Rain ${p.toFixed(1)}mm` : "No rain"}${rainyHours != null ? ` (rainy hours ${rainyHours})` : ""} · ` +
+        `rent_proxy ${Math.round(r)} · return_proxy ${Math.round(ret2)}`,
+      commands: [],
+    });
+  }
+
+  const risk = state?.rainRisk ?? null;
+  if (risk?.is_rainy_now && Array.isArray(risk.items) && risk.items.length) {
+    weatherCards.push({
+      level: "warning",
+      title: "雨天風險站點（現在）",
+      message: `Top ${Math.min(risk.items.length, 5)} stations by low nearby bike availability.`,
+      commands: [],
+      stations: risk.items.slice(0, 5).map((it) => ({ id: it.station_id, name: it.name || it.station_id, meta: it.mean_available_bikes })),
+    });
+  }
+
+  const allCallouts = [...weatherCards, ...effects, ...alerts].slice(0, 5);
   calloutsEl.innerHTML = "";
   for (const a of allCallouts) {
     const div = document.createElement("div");
@@ -1567,6 +1633,22 @@ function renderBriefing(status, state, { onboarding } = {}) {
         }
       });
       div.appendChild(row);
+    }
+
+    if (Array.isArray(a.stations) && a.stations.length) {
+      const box = document.createElement("div");
+      box.className = "row row-actions";
+      for (const it of a.stations.slice(0, 5)) {
+        const b = document.createElement("button");
+        b.className = "btn";
+        const metaTxt = it.meta == null ? "" : ` · ${Number(it.meta).toFixed(1)}`;
+        b.textContent = `${it.name}${metaTxt}`;
+        b.addEventListener("click", () =>
+          document.body.dispatchEvent(new CustomEvent("focus_station", { detail: { station_id: it.id } }))
+        );
+        box.appendChild(b);
+      }
+      div.appendChild(box);
     }
     calloutsEl.appendChild(div);
   }
@@ -1598,6 +1680,9 @@ async function main() {
     heatIndex: [],
     heatByStation: new Map(),
     lastHotspots: null,
+    weatherUsage: null,
+    rainRisk: null,
+    weatherSummary: null,
   };
 
   // Apply permalink hash overrides (if present).
@@ -1967,6 +2052,7 @@ async function main() {
       refreshExternalWeather({ quiet: true }).catch(() => {});
       // Narrative insights for Home page
       refreshHotspots({ quiet: true }).catch(() => {});
+      refreshWeatherInsights({ quiet: true }).catch(() => {});
       if (onboarding.shouldAutoOpen()) {
         const needsOnboarding = (payload?.alerts ?? []).some((a) =>
           String(a.title || "").toLowerCase().includes("onboarding")
@@ -1988,9 +2074,47 @@ async function main() {
       const m = await fetchJson("/meta");
       state.globalMeta = m;
       state.silverBuildMeta = m?.silver_build_meta ?? state.silverBuildMeta ?? null;
+      state.weatherSummary = m?.meta?.external?.weather_collector ?? null;
+      setWeatherPill(m);
+      applyRainMode({ source: "meta" }).catch(() => {});
       if (!quiet) setStatusText("Meta updated");
     } catch {
       // ignore
+    }
+  }
+
+  async function refreshWeatherInsights({ quiet = false } = {}) {
+    const city = state.lastStatusSnapshot?.tdx?.bike_cities?.[0] ?? state.stationById.get(state.selectedStationId)?.city ?? "Taipei";
+    try {
+      state.weatherUsage = await fetchJson(`/insights/weather_usage${qs({ city, hours: 24 })}`);
+    } catch {
+      state.weatherUsage = null;
+    }
+    try {
+      state.rainRisk = await fetchJson(`/insights/rain_risk_now${qs({ city, top_k: 5 })}`);
+    } catch {
+      state.rainRisk = null;
+    }
+    if (state.settings.app_view === "home" && state.lastStatusSnapshot) renderBriefing(state.lastStatusSnapshot, state, { onboarding });
+    if (!quiet) setStatusText("Weather insights updated");
+  }
+
+  async function applyRainMode({ source } = {}) {
+    if (!state.settings.rain_mode) return;
+    const rainy = Boolean(state.weatherSummary?.is_rainy_now);
+    if (!rainy) return;
+
+    // Switch to a rain-relevant view, but don't fight user choices if they've already customized heat.
+    if (!state.settings.show_bike_heat) {
+      setSetting("show_bike_heat", true);
+      await refreshHeatIndex();
+    }
+    if (state.settings.heat_metric === "available") setSetting("heat_metric", "rent_proxy");
+    if (state.settings.heat_agg !== "sum") setSetting("heat_agg", "sum");
+
+    if (state.settings.show_bike_heat) {
+      const idx = document.getElementById("heatTimeRange")?.value ?? state.settings.heat_ts_index;
+      await refreshHeatAtIndex(idx);
     }
   }
 
@@ -2199,6 +2323,16 @@ async function main() {
   async function refreshExternalWeather({ quiet = false } = {}) {
     try {
       const payload = await adminFetchJson("/external/weather_hourly/preview?limit=30");
+      const ws = state.weatherSummary;
+      const cov = ws?.coverage ?? ws?.heartbeat?.coverage ?? null;
+      const minTs = cov?.min_ts_utc ? String(cov.min_ts_utc) : null;
+      const maxTs = cov?.max_ts_utc ? String(cov.max_ts_utc) : null;
+      const rows = ws?.heartbeat?.rows != null ? Number(ws.heartbeat.rows) : null;
+      const note =
+        ws && typeof ws === "object"
+          ? `Collector: ${ws.stale ? "stale" : "ok"} · age ${formatAge(ws.heartbeat_age_s)} · rows ${rows ?? "—"} · ` +
+            `range ${minTs ? fmtTs(minTs) : "—"} → ${maxTs ? fmtTs(maxTs) : "—"}${ws.is_rainy_now ? " · raining now" : ""}`
+          : "Collector: unavailable";
       renderExternalCsvPanel(
         "externalWeather",
         {
@@ -2207,6 +2341,7 @@ async function main() {
           row_count: payload.row_count,
           issues: payload.issues,
           head: payload.rows?.slice?.(0, 5) ?? [],
+          note_html: note,
         },
         {
           onValidate: () => refreshExternalWeather({ quiet: false }),
@@ -2268,7 +2403,7 @@ async function main() {
   }
 
   function setAdminBusy(busy) {
-    const ids = ["btnStartCollector", "btnStopCollector", "btnBuildSilver"];
+    const ids = ["btnStartCollector", "btnStopCollector", "btnBuildSilver", "btnRefreshWeather"];
     for (const id of ids) {
       const el = document.getElementById(id);
       if (el) el.disabled = Boolean(busy);
@@ -2392,6 +2527,25 @@ async function main() {
       setAdminBusy(false);
     }
   });
+
+  document.getElementById("btnRefreshWeather").addEventListener("click", () =>
+    withConfirm("Request an immediate weather refresh now?", async () => {
+      setAdminBusy(true);
+      setOverlayVisible(true, "Refreshing weather…");
+      try {
+        const res = await adminPostJson("/admin/weather/refresh", null);
+        setStatusText(res?.detail || "Weather refresh requested");
+        document.getElementById("adminResult").innerHTML = `<div class="mono">${res?.detail || ""}</div>`;
+        await refreshMeta({ quiet: true });
+        await refreshWeatherInsights({ quiet: true });
+      } catch (e) {
+        setStatusText(`Weather refresh failed: ${e.message}`);
+      } finally {
+        setOverlayVisible(false);
+        setAdminBusy(false);
+      }
+    })
+  );
 
   function startEventStream() {
     if (!window.EventSource) return;
@@ -2556,6 +2710,7 @@ async function main() {
 
     document.getElementById("toggleNearbyBikes").checked = Boolean(state.settings.show_nearby_bikes);
     document.getElementById("toggleHeat").checked = Boolean(state.settings.show_bike_heat);
+    document.getElementById("toggleRainMode").checked = Boolean(state.settings.rain_mode);
     document.getElementById("heatMetricSelect").value = state.settings.heat_metric;
     document.getElementById("heatAggSelect").value = state.settings.heat_agg;
     document.getElementById("toggleHeatFollowLatest").checked = Boolean(state.settings.heat_follow_latest);
@@ -2999,6 +3154,11 @@ function setSetting(key, value) {
   bindToggle("toggleLinks", "show_links", () => {});
   bindToggle("toggleBuffer", "show_buffer", () => {
     setBufferCircle(state.stationById.get(state.selectedStationId));
+  });
+
+  document.getElementById("toggleRainMode").addEventListener("change", async (e) => {
+    setSetting("rain_mode", Boolean(e.target.checked));
+    await applyRainMode({ source: "ui" });
   });
 
   document.getElementById("toggleHeat").addEventListener("change", async (e) => {
