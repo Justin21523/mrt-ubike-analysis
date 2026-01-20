@@ -1900,61 +1900,22 @@ async function main() {
 
   configureChartsTheme();
 
-  // View (Home / Explorer / Insights / Ops / About) with backward-compatible migration from older `ui_mode`.
-  if (state.settings.app_view == null) state.settings.app_view = "explorer";
-  if (state.settings.ui_mode === "briefing") state.settings.app_view = "home";
-  if (state.settings.app_view === "data") state.settings.app_view = "ops";
-  setAppView(state.settings.app_view);
+  // Explorer is a dedicated page now; keep view fixed here.
+  state.settings.app_view = "explorer";
+  persistSettings();
+  setAppView("explorer");
 
-  function setView(view, { anchor } = {}) {
-    state.settings.app_view = view;
-    persistSettings();
-    setAppView(view);
-    if (view === "home" && state.lastStatusSnapshot) {
-      renderBriefing(state.lastStatusSnapshot, state, { onboarding });
-      refreshSnapshots();
-    }
-    if (view === "insights") {
-      refreshInsightsLists({ quiet: true }).catch(() => {});
-    }
-    if (view === "ops") {
-      const details = document.getElementById("detailsDataStatus");
-      if (details) details.open = true;
-    }
-    if (anchor) {
-      const details = document.getElementById("detailsDataStatus");
-      if (details) details.open = true;
-      setTimeout(() => {
-        const el =
-          anchor === "bronze"
-            ? document.querySelector('[data-anchor=\"bronze\"]')
-            : anchor === "silver"
-              ? document.querySelector('[data-anchor=\"silver\"]')
-              : anchor === "external"
-                ? document.getElementById("externalMetro")
-                : null;
-        el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-      }, 50);
-    }
-  }
-
-  document.getElementById("btnNavHome").addEventListener("click", () => setView("home"));
-  document.getElementById("btnNavExplorer").addEventListener("click", () => setView("explorer"));
-  document.getElementById("btnNavInsights").addEventListener("click", () => setView("insights"));
-  document.getElementById("btnNavOps").addEventListener("click", () => setView("ops"));
-  document.getElementById("btnNavAbout").addEventListener("click", () => setView("about"));
-
-  document.body.addEventListener("nav", (ev) => {
-    const d = ev.detail || {};
-    if (!d.view) return;
-    setView(d.view, { anchor: d.anchor });
-  });
+  // Page navigation (multi-page, not tabbed panels).
+  document.getElementById("btnNavHome")?.addEventListener("click", () => (window.location.href = "/home"));
+  document.getElementById("btnNavExplorer")?.addEventListener("click", () => (window.location.href = "/explorer"));
+  document.getElementById("btnNavInsights")?.addEventListener("click", () => (window.location.href = "/insights"));
+  document.getElementById("btnNavOps")?.addEventListener("click", () => (window.location.href = "/ops"));
+  document.getElementById("btnNavAbout")?.addEventListener("click", () => (window.location.href = "/about"));
   document.body.addEventListener("focus_station", (ev) => {
     const id = ev.detail?.station_id;
     if (!id) return;
     selectStationById(id, { focus: true });
     refreshSelectedStation({ reason: "briefing" });
-    setView("explorer");
   });
   document.body.addEventListener("set_heat", async (ev) => {
     const metric = ev.detail?.metric;

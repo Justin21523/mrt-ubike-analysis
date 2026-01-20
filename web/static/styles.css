@@ -37,6 +37,12 @@ body {
   height: 100vh;
 }
 
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 14px 12px;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;

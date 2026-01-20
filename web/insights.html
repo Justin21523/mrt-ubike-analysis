@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetroBikeAtlas · Insights</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260120-2" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-title">MetroBikeAtlas</div>
+          <div class="brand-subtitle">MRT × Shared Bike × City Factors</div>
+        </div>
+        <div class="pill" id="modePill">Loading…</div>
+        <div class="pill" id="weatherPill">Weather: —</div>
+      </div>
+      <div class="toolbar-center">
+        <div class="nav" role="navigation" aria-label="Pages">
+          <a class="btn nav-btn" href="/home">Home</a>
+          <a class="btn nav-btn" href="/explorer">Explorer</a>
+          <a class="btn nav-btn active" href="/insights">Insights</a>
+          <a class="btn nav-btn" href="/ops">Ops</a>
+          <a class="btn nav-btn" href="/about">About</a>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <div class="kbd-hint">Click item → open in Explorer</div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="panel" aria-label="Insights">
+        <div class="section-title">Insights</div>
+        <div class="hint">清單是簡報的「證據附件」：每筆可直接跳到 Explorer。</div>
+
+        <div class="grid2">
+          <div class="field">
+            <label class="label" for="insightsMode">Mode</label>
+            <select id="insightsMode" class="select">
+              <option value="hotspots">hotspots</option>
+              <option value="coldspots">coldspots</option>
+              <option value="shortage">shortage (low availability)</option>
+              <option value="pressure">pressure (high rent_proxy)</option>
+              <option value="rainy_risk">rainy-risk (now)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="insightsTopK">Top K</label>
+            <input id="insightsTopK" class="input input-number" type="number" min="1" max="50" step="1" value="10" />
+          </div>
+        </div>
+
+        <div class="row row-actions">
+          <button class="btn btn-primary" id="btnRefreshInsights">Refresh</button>
+          <a class="btn" href="/explorer">Open Explorer</a>
+        </div>
+
+        <div class="status-block" id="insightsList">Loading…</div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <div id="statusText" class="status-text">Ready</div>
+      <div class="status-actions"></div>
+    </footer>
+
+    <script src="/static/insights.js?v=20260120-2"></script>
+  </body>
+</html>
+

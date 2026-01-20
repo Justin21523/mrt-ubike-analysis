@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetroBikeAtlas · About</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260120-2" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-title">MetroBikeAtlas</div>
+          <div class="brand-subtitle">MRT × Shared Bike × City Factors</div>
+        </div>
+      </div>
+      <div class="toolbar-center">
+        <div class="nav" role="navigation" aria-label="Pages">
+          <a class="btn nav-btn" href="/home">Home</a>
+          <a class="btn nav-btn" href="/explorer">Explorer</a>
+          <a class="btn nav-btn" href="/insights">Insights</a>
+          <a class="btn nav-btn" href="/ops">Ops</a>
+          <a class="btn nav-btn active" href="/about">About</a>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <div class="kbd-hint">Methods & limitations</div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="panel" aria-label="About">
+        <div class="section-title">About / Methods</div>
+        <div class="status-block">
+          <div class="hint">Data sources</div>
+          <ul class="list">
+            <li><span class="mono">TDX</span> · Metro/Bike open data (OAuth2), collected into Bronze → Silver</li>
+            <li><span class="mono">Open‑Meteo</span> · Hourly weather, stored as <span class="mono">data/external/weather_hourly.csv</span></li>
+          </ul>
+          <div class="hint">Key definitions</div>
+          <ul class="list">
+            <li><span class="mono">available</span> · nearby bike availability aggregated to each MRT station</li>
+            <li><span class="mono">rent_proxy / return_proxy</span> · proxy demand signals derived from bike snapshots</li>
+          </ul>
+          <div class="hint">Limitations</div>
+          <ul class="list">
+            <li>Weather is a city point estimate (not per-station microclimate).</li>
+            <li>Proxy signals are directional indicators; validate before policy decisions.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <div id="statusText" class="status-text">Ready</div>
+      <div class="status-actions"></div>
+    </footer>
+  </body>
+</html>
+

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetroBikeAtlas · Ops</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260120-2" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-title">MetroBikeAtlas</div>
+          <div class="brand-subtitle">MRT × Shared Bike × City Factors</div>
+        </div>
+        <div class="pill" id="modePill">Loading…</div>
+        <div class="pill" id="weatherPill">Weather: —</div>
+      </div>
+      <div class="toolbar-center">
+        <div class="nav" role="navigation" aria-label="Pages">
+          <a class="btn nav-btn" href="/home">Home</a>
+          <a class="btn nav-btn" href="/explorer">Explorer</a>
+          <a class="btn nav-btn" href="/insights">Insights</a>
+          <a class="btn nav-btn active" href="/ops">Ops</a>
+          <a class="btn nav-btn" href="/about">About</a>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <div class="kbd-hint">Local ops / admin controls</div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="panel" aria-label="Operations">
+        <div class="section-title">Data Status</div>
+        <div class="row row-actions">
+          <button class="btn btn-primary" id="btnRefreshStatus">Refresh</button>
+          <button class="btn" id="btnStartCollector">Start collector</button>
+          <button class="btn" id="btnStopCollector">Stop collector</button>
+          <button class="btn" id="btnBuildSilver">Build Silver (async)</button>
+          <button class="btn" id="btnRefreshWeather">Refresh weather</button>
+          <span class="hint mono" id="statusUpdatedAt"></span>
+        </div>
+
+        <div class="row row-actions">
+          <input class="input" id="adminTokenInput" type="password" placeholder="Admin token (optional)" />
+          <button class="btn" id="btnSaveAdminToken">Save token</button>
+          <button class="btn" id="btnClearAdminToken">Clear</button>
+        </div>
+
+        <div class="health-cards" id="healthCards"></div>
+        <div class="status-block" id="opsAlerts"></div>
+
+        <div class="section-subtitle">Jobs</div>
+        <div class="status-block" id="jobCenter">Loading…</div>
+
+        <div class="section-subtitle">External inputs</div>
+        <div class="status-block" id="externalMetro">Loading…</div>
+        <div class="status-block" id="externalCalendar" style="margin-top:10px;">Loading…</div>
+        <div class="status-block" id="externalWeather" style="margin-top:10px;">Loading…</div>
+
+        <div class="section-subtitle">Admin result</div>
+        <div class="status-block" id="adminResult"></div>
+      </section>
+    </main>
+
+    <div class="overlay hidden" id="loadingOverlay" aria-hidden="true" hidden>
+      <div class="overlay-card">
+        <div class="overlay-title">Working…</div>
+        <div class="overlay-subtitle" id="overlayText">Please wait</div>
+      </div>
+    </div>
+
+    <footer class="statusbar">
+      <div id="statusText" class="status-text">Ready</div>
+      <div class="status-actions"></div>
+    </footer>
+
+    <script src="/static/ops.js?v=20260120-2"></script>
+  </body>
+</html>
+

@@ -8,8 +8,9 @@ from pathlib import Path
 # `FastAPI` is the Python web framework that exposes our data as HTTP endpoints for the web UI.
 from fastapi import FastAPI
 
-# `FileResponse` efficiently streams a file from disk (used for serving `web/index.html`).
+# `FileResponse` efficiently streams a file from disk (used for serving HTML/asset files).
 from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 
 # `StaticFiles` serves assets (JS/CSS) so the browser (DOM) can load the dashboard bundle.
@@ -62,8 +63,8 @@ def create_app(config: AppConfig) -> FastAPI:
     # We serve JS/CSS from `/static/*` (browser will request these files to render the dashboard DOM).
     assets_dir = static_dir / "static"
 
-    # The root route (`/`) returns `index.html` so the user can open the dashboard in a browser.
-    index_html = static_dir / "index.html"
+    def _page(path: Path) -> FileResponse:
+        return FileResponse(path)
 
     # Only mount `/static` if the directory exists so the API can still run in minimal environments.
     if assets_dir.exists():
@@ -72,10 +73,28 @@ def create_app(config: AppConfig) -> FastAPI:
         app.mount("/static", StaticFiles(directory=assets_dir), name="static")
 
     @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
-        # Serve the HTML entrypoint; the browser then loads `/static/app.js` and renders the UI.
-        # Pitfall: if `index.html` is missing, this will 500; keep the repo layout consistent.
-        return FileResponse(index_html)
+    def index() -> RedirectResponse:
+        return RedirectResponse(url="/home", status_code=302)
+
+    @app.get("/home", include_in_schema=False)
+    def home() -> FileResponse:
+        return _page(static_dir / "home.html")
+
+    @app.get("/explorer", include_in_schema=False)
+    def explorer() -> FileResponse:
+        return _page(static_dir / "explorer.html")
+
+    @app.get("/insights", include_in_schema=False)
+    def insights() -> FileResponse:
+        return _page(static_dir / "insights.html")
+
+    @app.get("/ops", include_in_schema=False)
+    def ops() -> FileResponse:
+        return _page(static_dir / "ops.html")
+
+    @app.get("/about", include_in_schema=False)
+    def about() -> FileResponse:
+        return _page(static_dir / "about.html")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:

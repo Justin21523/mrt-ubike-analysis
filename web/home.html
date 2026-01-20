@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetroBikeAtlas · Home</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260120-2" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-title">MetroBikeAtlas</div>
+          <div class="brand-subtitle">MRT × Shared Bike × City Factors</div>
+        </div>
+        <div class="pill" id="modePill">Loading…</div>
+        <div class="pill" id="weatherPill">Weather: —</div>
+      </div>
+      <div class="toolbar-center">
+        <div class="nav" role="navigation" aria-label="Pages">
+          <a class="btn nav-btn active" href="/home">Home</a>
+          <a class="btn nav-btn" href="/explorer">Explorer</a>
+          <a class="btn nav-btn" href="/insights">Insights</a>
+          <a class="btn nav-btn" href="/ops">Ops</a>
+          <a class="btn nav-btn" href="/about">About</a>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <div class="kbd-hint">Story-first briefing view</div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="briefing" aria-label="Home briefing">
+        <div class="briefing-header">
+          <div>
+            <div class="briefing-kicker">Service Design · Public Policy Brief</div>
+            <div class="briefing-title">Executive Summary</div>
+            <div class="briefing-subtitle">一眼看懂資料狀態與今日洞察</div>
+          </div>
+          <div class="briefing-actions">
+            <a class="btn btn-primary" href="/explorer">Open Explorer</a>
+            <a class="btn" href="/ops">Open Ops</a>
+          </div>
+        </div>
+
+        <div class="briefing-kpis" id="homeKpis"></div>
+
+        <div class="briefing-card">
+          <div class="briefing-card-title">Today</div>
+          <div class="briefing-body" id="homeConclusion">Loading…</div>
+        </div>
+
+        <div class="briefing-cards">
+          <div class="briefing-card">
+            <div class="briefing-card-title">Story card · Rain × Usage</div>
+            <div class="briefing-body" id="homeRainUsage">Loading…</div>
+          </div>
+          <div class="briefing-card">
+            <div class="briefing-card-title">Story card · Rain risk stations</div>
+            <div class="briefing-body" id="homeRainRisk">Loading…</div>
+          </div>
+        </div>
+
+        <div class="briefing-callouts" id="homeCallouts"></div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <div id="statusText" class="status-text">Ready</div>
+      <div class="status-actions"></div>
+    </footer>
+
+    <script src="/static/home.js?v=20260120-2"></script>
+  </body>
+</html>
+
