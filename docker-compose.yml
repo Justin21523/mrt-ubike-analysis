@@ -20,6 +20,7 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
+      - ./web:/app/web:ro
     restart: unless-stopped
     stop_grace_period: 30s
     logging:
