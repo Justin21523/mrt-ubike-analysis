@@ -4,7 +4,7 @@ services:
     container_name: metrobikeatlas-api
     init: true
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:
@@ -14,6 +14,8 @@ services:
       - METROBIKEATLAS_FORWARDED_ALLOW_IPS=*
       - METROBIKEATLAS_STORAGE=sqlite
       - METROBIKEATLAS_LAZY_BIKE_TS=true
+      # Docker port mapping shows client IP as a private bridge IP; allow admin endpoints for local ops.
+      - METROBIKEATLAS_ALLOW_PRIVATE_ADMIN=true
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

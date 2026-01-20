@@ -8,6 +8,8 @@ import asyncio
 import json
 # `os` is used for process checks (collector PID).
 import os
+# `ipaddress` lets us safely parse client IPs for docker-localhost allowances.
+import ipaddress
 # `Path` reads local artifacts (Bronze/Silver, logs).
 from pathlib import Path
 # `signal` is used to stop background collector processes.
@@ -605,6 +607,17 @@ def _require_localhost(request: Request) -> None:
     host = getattr(getattr(request, "client", None), "host", None)
     if host in {"127.0.0.1", "::1"}:
         return
+
+    # Docker port mapping: the app may see the host as a private gateway IP (e.g. 172.17.0.1).
+    # Allow this only when explicitly enabled, and prefer binding the service to 127.0.0.1 on the host.
+    allow_private = (os.getenv("METROBIKEATLAS_ALLOW_PRIVATE_ADMIN") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    if allow_private and isinstance(host, str):
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private:
+                return
+        except Exception:
+            pass
 
     # Optional remote admin: require a shared token and apply lightweight rate limiting.
     admin_token = os.getenv("METROBIKEATLAS_ADMIN_TOKEN")
@@ -2620,20 +2633,40 @@ def list_stations2(service: StationService = Depends(get_service), response: Res
         stations = fallback
         fallback_source = "external_csv"
 
-    items = [
-        StationOut(
-            id=s["station_id"],
-            name=s["name"],
-            lat=s["lat"],
-            lon=s["lon"],
-            city=s.get("city"),
-            system=s.get("system"),
-            district=s.get("district"),
-            cluster=s.get("cluster"),
-            source=s.get("source"),
+    def _clean_cluster(v: object) -> int | None:
+        if v is None:
+            return None
+        # Pandas may emit NaN (float) for missing clusters; Pydantic rejects it.
+        try:
+            import math
+
+            if isinstance(v, float) and (math.isnan(v) or not math.isfinite(v)):
+                return None
+        except Exception:
+            pass
+        try:
+            if isinstance(v, str) and v.strip() == "":
+                return None
+            n = int(v)  # type: ignore[arg-type]
+            return n
+        except Exception:
+            return None
+
+    items = []
+    for s in stations:
+        items.append(
+            StationOut(
+                id=s["station_id"],
+                name=s["name"],
+                lat=s["lat"],
+                lon=s["lon"],
+                city=s.get("city"),
+                system=s.get("system"),
+                district=s.get("district"),
+                cluster=_clean_cluster(s.get("cluster")),
+                source=s.get("source"),
+            )
         )
-        for s in stations
-    ]
     meta = _meta_contract(service=service, fallback_source=fallback_source)
     if response is not None:
         etag = None
