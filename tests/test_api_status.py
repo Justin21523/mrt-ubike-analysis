@@ -41,6 +41,9 @@ def test_admin_endpoints_block_non_localhost(monkeypatch) -> None:
     resp = client.post("/admin/collector/restart_if_stale", json={})
     assert resp.status_code == 403
 
+    resp = client.post("/admin/weather/refresh", json={})
+    assert resp.status_code == 403
+
     resp = client.get("/admin/jobs")
     assert resp.status_code == 403
 

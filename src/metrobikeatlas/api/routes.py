@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # `datetime` gives a stable "now" timestamp for status endpoints.
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 # `asyncio` powers lightweight SSE event streaming without extra dependencies.
 import asyncio
 # `json` serializes SSE payloads for the browser.
@@ -16,6 +16,8 @@ import signal
 import subprocess
 # `sys.executable` ensures we invoke scripts with the current interpreter.
 import sys
+# `sqlite3` is used for lightweight read-only insights on the long-run SQLite store.
+import sqlite3
 # We use `Literal` to restrict certain query parameters to a small, documented set of values.
 # We use `Optional[...]` for parameters that can be omitted so the server can fall back to config defaults.
 from typing import Literal, Optional
@@ -190,8 +192,16 @@ def get_meta(service: StationService = Depends(get_service), response: Response 
         hb_ts = None
         if isinstance(out.collector_heartbeat, dict):
             hb_ts = out.collector_heartbeat.get("ts_utc")
-        if bid or hb_ts:
-            etag = f"W/\"meta-{bid or 'none'}-{hb_ts or 'none'}\""
+        wh_ts = None
+        try:
+            ext = out.meta.get("external") if isinstance(out.meta, dict) else None
+            wc = ext.get("weather_collector") if isinstance(ext, dict) else None
+            wh = wc.get("heartbeat") if isinstance(wc, dict) else None
+            wh_ts = wh.get("ts_utc") if isinstance(wh, dict) else None
+        except Exception:
+            wh_ts = None
+        if bid or hb_ts or wh_ts:
+            etag = f"W/\"meta-{bid or 'none'}-{hb_ts or 'none'}-{wh_ts or 'none'}\""
         _set_cache_headers(response, etag=etag, max_age_s=5)
     return out
 
@@ -249,6 +259,60 @@ def _read_collector_heartbeat(repo_root: Path) -> dict[str, object] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _read_json_file(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _weather_summary(repo_root: Path) -> dict[str, object]:
+    """
+    Best-effort summary for the long-running weather collector and its output.
+
+    Used by `/meta` to power UI trust signals (source/age/rain badge) without requiring admin access.
+    """
+
+    hb_path = repo_root / "logs" / "weather_heartbeat.json"
+    hb = _read_json_file(hb_path) or {}
+    now = datetime.now(timezone.utc)
+
+    hb_age_s: float | None = None
+    ts_raw = hb.get("ts_utc")
+    if ts_raw:
+        try:
+            hb_ts = datetime.fromisoformat(str(ts_raw)).astimezone(timezone.utc)
+            hb_age_s = max((now - hb_ts).total_seconds(), 0.0)
+        except Exception:
+            hb_age_s = None
+
+    interval_s = int(os.getenv("WEATHER_INTERVAL_SECONDS", "1800") or 1800)
+    stale_s = max(2 * interval_s + 120, 900)
+    stale = hb_age_s is None or hb_age_s > float(stale_s)
+
+    coverage = hb.get("coverage") if isinstance(hb.get("coverage"), dict) else {}
+    latest_precip = coverage.get("latest_observed_precip_mm") if isinstance(coverage, dict) else None
+    try:
+        latest_precip_f = float(latest_precip) if latest_precip is not None else None
+    except Exception:
+        latest_precip_f = None
+
+    return {
+        "heartbeat_path": str(hb_path),
+        "heartbeat": hb,
+        "heartbeat_age_s": hb_age_s,
+        "interval_s": interval_s,
+        "stale": bool(stale),
+        "coverage": coverage if isinstance(coverage, dict) else {},
+        "latest_observed_precip_mm": latest_precip_f,
+        "is_rainy_now": bool(latest_precip_f is not None and latest_precip_f > 0.0),
+        "commands": ["docker compose up -d weather"],
+    }
 
 
 def _collector_running_from_heartbeat(
@@ -318,6 +382,7 @@ def _meta_contract(
         "has_calendar": bool(has_calendar),
         "has_weather_hourly": bool(has_weather),
         "has_sqlite": bool(has_sqlite),
+        "weather_collector": _weather_summary(repo_root),
         "silver": {
             "calendar": _file_status(calendar_silver).model_dump(mode="json"),
             "weather_hourly": _file_status(weather_silver).model_dump(mode="json"),
@@ -1344,6 +1409,28 @@ def admin_restart_collector_if_stale(
     )
 
 
+@router.post("/admin/weather/refresh")
+def admin_weather_refresh(request: Request) -> dict[str, object]:
+    """
+    Request an immediate weather refresh without restarting containers.
+
+    Implementation: write `logs/weather_refresh_request.json` which the `weather` collector watches for.
+    """
+
+    _require_localhost(request)
+    repo_root = _resolve_repo_root()
+    path = repo_root / "logs" / "weather_refresh_request.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "requested_by": getattr(getattr(request, "client", None), "host", None),
+    }
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return {"detail": "weather refresh requested", "path": str(path), "ts_utc": payload["ts_utc"]}
+
+
 @router.post("/admin/build_silver", response_model=AdminActionOut)
 def admin_build_silver(request: Request, dry_run: bool = False) -> AdminActionOut:
     _require_localhost(request)
@@ -1655,6 +1742,182 @@ def hotspots(
         "Use this list for narrative exploration; validate with longer windows before policy decisions."
     )
     return HotspotsOut(metric=str(metric), agg=str(agg), ts=target_py, hot=hot_out, cold=cold_out, explanation=explanation)
+
+
+@router.get("/insights/weather_usage")
+def weather_usage_insight(
+    city: str = "Taipei",
+    hours: int = 24,
+) -> dict[str, object]:
+    """
+    Public insight endpoint: summarize recent rain vs. bike rent/return proxies.
+
+    Notes:
+    - Uses Open-Meteo-derived `data/external/weather_hourly.csv` (no admin required).
+    - Uses the long-run SQLite store `data/silver/metrobikeatlas.db` when available.
+    """
+
+    repo_root = _resolve_repo_root()
+    now = datetime.now(timezone.utc)
+    window_h = max(int(hours), 1)
+    start = now - timedelta(hours=window_h)
+
+    # Weather precipitation summary (external CSV).
+    from metrobikeatlas.ingestion.external_inputs import load_external_weather_hourly_csv
+    import pandas as pd
+
+    w_path = repo_root / "data" / "external" / "weather_hourly.csv"
+    precip_total = None
+    rainy_hours = None
+    weather_range = {"min_ts_utc": None, "max_ts_utc": None}
+    if w_path.exists():
+        try:
+            w = load_external_weather_hourly_csv(w_path)
+            w["ts_dt"] = pd.to_datetime(w["ts"], utc=True, errors="coerce")
+            w = w.dropna(subset=["ts_dt"]).copy()
+            w = w.loc[w["city"].astype(str) == str(city)].copy()
+            w = w.loc[(w["ts_dt"] >= start) & (w["ts_dt"] <= now)].copy()
+            precip = pd.to_numeric(w["precip_mm"], errors="coerce").fillna(0.0)
+            precip_total = float(precip.sum()) if len(precip) else 0.0
+            rainy_hours = int((precip > 0.0).sum()) if len(precip) else 0
+            if len(w):
+                weather_range["min_ts_utc"] = w["ts_dt"].min().to_pydatetime().isoformat()
+                weather_range["max_ts_utc"] = w["ts_dt"].max().to_pydatetime().isoformat()
+        except Exception:
+            precip_total = None
+            rainy_hours = None
+
+    # Bike proxy totals (SQLite).
+    db_path = repo_root / "data" / "silver" / "metrobikeatlas.db"
+    rent_total = None
+    return_total = None
+    if db_path.exists():
+        start_s = start.strftime("%Y-%m-%dT%H:%M:%S%z")
+        end_s = now.strftime("%Y-%m-%dT%H:%M:%S%z")
+        try:
+            conn = sqlite3.connect(str(db_path))
+            try:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(rent_proxy), 0.0), COALESCE(SUM(return_proxy), 0.0) "
+                    "FROM bike_timeseries WHERE city = ? AND ts >= ? AND ts <= ?",
+                    (str(city), start_s, end_s),
+                ).fetchone()
+                if row:
+                    rent_total = float(row[0] or 0.0)
+                    return_total = float(row[1] or 0.0)
+            finally:
+                conn.close()
+        except Exception:
+            rent_total = None
+            return_total = None
+
+    net = None if rent_total is None or return_total is None else float(rent_total - return_total)
+    if precip_total is None or rent_total is None or return_total is None:
+        conclusion = "Weather/usage insights unavailable (missing external weather CSV or SQLite store)."
+    else:
+        if precip_total > 0 and rainy_hours and rainy_hours > 0:
+            conclusion = f"Last {window_h}h: rain detected ({precip_total:.1f}mm across {rainy_hours} hours); rent_proxy={rent_total:.0f}, return_proxy={return_total:.0f}."
+        else:
+            conclusion = f"Last {window_h}h: no rain detected; rent_proxy={rent_total:.0f}, return_proxy={return_total:.0f}."
+
+    return {
+        "city": str(city),
+        "window_hours": int(window_h),
+        "ts_start_utc": start.isoformat(),
+        "ts_end_utc": now.isoformat(),
+        "precip_total_mm": precip_total,
+        "rainy_hours": rainy_hours,
+        "rent_proxy_total": rent_total,
+        "return_proxy_total": return_total,
+        "net_rent_proxy": net,
+        "weather_path": str(w_path),
+        "sqlite_path": str(db_path),
+        "weather_range": weather_range,
+        "conclusion": conclusion,
+    }
+
+
+@router.get("/insights/rain_risk_now")
+def rain_risk_now(
+    city: str = "Taipei",
+    top_k: int = 5,
+) -> dict[str, object]:
+    """
+    Public insight endpoint: when it's raining now, rank metro stations by low nearby bike availability.
+
+    This is intentionally "now-focused" (for operational dashboards) and avoids expensive per-hour joins.
+    """
+
+    repo_root = _resolve_repo_root()
+    weather = _weather_summary(repo_root)
+    if not weather.get("is_rainy_now"):
+        return {"city": str(city), "is_rainy_now": False, "items": [], "message": "Not rainy now."}
+
+    db_path = repo_root / "data" / "silver" / "metrobikeatlas.db"
+    if not db_path.exists():
+        raise HTTPException(status_code=503, detail="SQLite store unavailable (data/silver/metrobikeatlas.db missing).")
+
+    # Latest bike snapshot for the city.
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            ts_row = conn.execute("SELECT MAX(ts) FROM bike_timeseries WHERE city = ?", (str(city),)).fetchone()
+            latest_ts = ts_row[0] if ts_row else None
+            if not latest_ts:
+                raise HTTPException(status_code=503, detail="No bike_timeseries rows for city.")
+            rows = conn.execute(
+                "SELECT station_id, available_bikes FROM bike_timeseries WHERE city = ? AND ts = ?",
+                (str(city), str(latest_ts)),
+            ).fetchall()
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    avail_by_bike: dict[str, float] = {}
+    for sid, avail in rows:
+        if sid is None:
+            continue
+        try:
+            avail_by_bike[str(sid)] = float(avail or 0.0)
+        except Exception:
+            continue
+
+    # Load links + metro names from Silver (small files).
+    import pandas as pd
+
+    links_path = repo_root / "data" / "silver" / "metro_bike_links.csv"
+    metro_path = repo_root / "data" / "silver" / "metro_stations.csv"
+    if not links_path.exists() or not metro_path.exists():
+        raise HTTPException(status_code=503, detail="Silver link tables missing.")
+
+    links = pd.read_csv(links_path, dtype={"metro_station_id": str, "bike_station_id": str})
+    metro = pd.read_csv(metro_path, dtype={"station_id": str, "name": str})
+    name_by_metro = {str(r["station_id"]): str(r.get("name") or r["station_id"]) for _, r in metro.iterrows()}
+
+    links["available_bikes"] = links["bike_station_id"].map(avail_by_bike).astype("float64")
+    g = links.dropna(subset=["available_bikes"]).groupby("metro_station_id")["available_bikes"]
+    score = g.mean().sort_values(ascending=True)
+
+    items = []
+    for metro_id, mean_avail in score.head(max(int(top_k), 1)).items():
+        items.append(
+            {
+                "station_id": str(metro_id),
+                "name": name_by_metro.get(str(metro_id)),
+                "mean_available_bikes": float(mean_avail),
+            }
+        )
+
+    return {
+        "city": str(city),
+        "is_rainy_now": True,
+        "latest_ts": str(latest_ts),
+        "latest_observed_precip_mm": weather.get("latest_observed_precip_mm"),
+        "items": items,
+    }
 
 
 @router.get("/briefing/export")
