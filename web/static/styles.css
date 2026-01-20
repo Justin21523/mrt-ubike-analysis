@@ -25,6 +25,10 @@
   box-sizing: border-box;
 }
 
+.hidden {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
@@ -240,6 +244,10 @@ body {
   max-width: 560px;
 }
 
+.panel.hidden {
+  display: none;
+}
+
 .view-home #rightPanel,
 .view-home #splitterRight {
   display: none;
@@ -257,21 +265,53 @@ body {
   grid-template-columns: var(--left-size) var(--splitter) 1fr;
 }
 
-.view-data #rightPanel,
-.view-data #splitterRight {
+.view-ops #rightPanel,
+.view-ops #splitterRight {
   display: none;
 }
 
-.view-data {
+.view-ops {
   --right-size: 0px;
 }
 
-.view-data .workspace {
+.view-ops .workspace {
   grid-template-columns: var(--left-size) var(--splitter) 1fr;
 }
 
-.view-data #leftPanel .details:not(#detailsDataStatus) {
+.view-ops #leftPanel .details:not(#detailsDataStatus) {
   display: none;
+}
+
+.view-ops #explorerPanel,
+.view-ops #insightsPanel,
+.view-ops #aboutPanel,
+.view-home #explorerPanel,
+.view-home #insightsPanel,
+.view-home #aboutPanel,
+.view-insights #explorerPanel,
+.view-insights #aboutPanel,
+.view-insights #briefingPanel,
+.view-about #explorerPanel,
+.view-about #insightsPanel,
+.view-about #briefingPanel {
+  display: none;
+}
+
+.view-insights #rightPanel,
+.view-insights #splitterRight,
+.view-about #rightPanel,
+.view-about #splitterRight {
+  display: none;
+}
+
+.view-insights,
+.view-about {
+  --right-size: 0px;
+}
+
+.view-insights .workspace,
+.view-about .workspace {
+  grid-template-columns: var(--left-size) var(--splitter) 1fr;
 }
 
 .briefing {

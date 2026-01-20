@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MetroBikeAtlas</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -27,7 +28,9 @@
         <div class="nav" role="tablist" aria-label="Pages">
           <button class="btn nav-btn" id="btnNavHome" role="tab" aria-selected="false">Home</button>
           <button class="btn nav-btn" id="btnNavExplorer" role="tab" aria-selected="true">Explorer</button>
-          <button class="btn nav-btn" id="btnNavData" role="tab" aria-selected="false">Data</button>
+          <button class="btn nav-btn" id="btnNavInsights" role="tab" aria-selected="false">Insights</button>
+          <button class="btn nav-btn" id="btnNavOps" role="tab" aria-selected="false">Ops</button>
+          <button class="btn nav-btn" id="btnNavAbout" role="tab" aria-selected="false">About</button>
         </div>
         <button class="btn" id="btnResetView" title="Reset view (R)">Reset</button>
         <button class="btn" id="btnToggleLeft" title="Toggle left panel">Left</button>
@@ -68,6 +71,23 @@
             </div>
 
             <div class="briefing-kpis" id="briefingKpis"></div>
+
+            <div class="briefing-card">
+              <div class="briefing-card-title">Today</div>
+              <div class="briefing-body" id="homeConclusion">Loading…</div>
+              <div class="row row-actions" id="homeActions"></div>
+            </div>
+
+            <div class="briefing-cards">
+              <div class="briefing-card">
+                <div class="briefing-card-title">Story card · Rain × Usage</div>
+                <div class="briefing-body" id="homeRainUsageCard">Loading…</div>
+              </div>
+              <div class="briefing-card">
+                <div class="briefing-card-title">Story card · Rain risk stations</div>
+                <div class="briefing-body" id="homeRainRiskCard">Loading…</div>
+              </div>
+            </div>
 
             <div class="briefing-stepper" id="briefingStepper" role="tablist" aria-label="Story steps"></div>
             <div class="briefing-story">
@@ -110,20 +130,68 @@
             </div>
           </section>
 
-          <div class="section-title">Stations</div>
-          <div class="field">
-            <label class="label" for="stationSearch">Search</label>
-            <input id="stationSearch" class="input" placeholder="Type to search… (Ctrl+K)" autocomplete="off" />
-            <div id="stationResults" class="results hidden"></div>
-          </div>
+          <section class="panel hidden" id="insightsPanel" aria-label="Insights">
+            <div class="section-title">Insights</div>
+            <div class="hint">一鍵清單：點一下就定位到地圖（更像簡報的證據附件）。</div>
+            <div class="grid2">
+              <div class="field">
+                <label class="label" for="insightsMode">Mode</label>
+                <select id="insightsMode" class="select">
+                  <option value="hotspots">hotspots</option>
+                  <option value="coldspots">coldspots</option>
+                  <option value="shortage">shortage (low availability)</option>
+                  <option value="pressure">pressure (high rent_proxy)</option>
+                  <option value="rainy_risk">rainy-risk (now)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="label" for="insightsTopK">Top K</label>
+                <input id="insightsTopK" class="input input-number" type="number" min="1" max="50" step="1" />
+              </div>
+            </div>
+            <div class="row row-actions">
+              <button class="btn btn-primary" id="btnRefreshInsights">Refresh lists</button>
+              <button class="btn" id="btnInsightsToExplorer">Open Explorer</button>
+            </div>
+            <div class="status-block" id="insightsList">Loading…</div>
+          </section>
 
-          <div class="field">
-            <label class="label" for="stationSelect">Selected</label>
-            <select id="stationSelect" class="select"></select>
-          </div>
+          <section class="panel hidden" id="aboutPanel" aria-label="About">
+            <div class="section-title">About / Methods</div>
+            <div class="status-block">
+              <div class="hint">Data sources</div>
+              <ul class="list">
+                <li><span class="mono">TDX</span> · Metro/Bike open data (OAuth2), collected into Bronze → Silver</li>
+                <li><span class="mono">Open‑Meteo</span> · Hourly weather (no API key), stored as <span class="mono">data/external/weather_hourly.csv</span></li>
+              </ul>
+              <div class="hint">Key definitions</div>
+              <ul class="list">
+                <li><span class="mono">available</span> · nearby bike availability aggregated to each MRT station</li>
+                <li><span class="mono">rent_proxy / return_proxy</span> · proxy demand signals derived from bike snapshots</li>
+              </ul>
+              <div class="hint">Limitations</div>
+              <ul class="list">
+                <li>Weather is a city point estimate (not per-station microclimate).</li>
+                <li>Proxy signals are directional indicators; validate before policy decisions.</li>
+              </ul>
+            </div>
+          </section>
 
-          <details class="details" open>
-            <summary class="summary">Controls</summary>
+          <section class="panel" id="explorerPanel" aria-label="Explorer sidebar">
+            <div class="section-title">Stations</div>
+            <div class="field">
+              <label class="label" for="stationSearch">Search</label>
+              <input id="stationSearch" class="input" placeholder="Type to search… (Ctrl+K)" autocomplete="off" />
+              <div id="stationResults" class="results hidden"></div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="stationSelect">Selected</label>
+              <select id="stationSelect" class="select"></select>
+            </div>
+
+            <details class="details" open>
+              <summary class="summary">Controls</summary>
 
             <div class="grid2">
               <div class="field">
@@ -281,6 +349,7 @@
               <button class="btn" id="btnResetSettings">Reset</button>
             </div>
           </details>
+          </section>
         </div>
       </aside>
 

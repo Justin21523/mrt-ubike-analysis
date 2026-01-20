@@ -835,6 +835,8 @@ function defaultSettingsFromConfig(cfg) {
     right_collapsed: false,
     app_view: "explorer",
     story_step: "problem",
+    insights_mode: "hotspots",
+    insights_top_k: 10,
   };
 }
 
@@ -1155,7 +1157,13 @@ function configureChartsTheme() {
 }
 
 function setNavActive(view) {
-  const map = { home: "btnNavHome", explorer: "btnNavExplorer", data: "btnNavData" };
+  const map = {
+    home: "btnNavHome",
+    explorer: "btnNavExplorer",
+    insights: "btnNavInsights",
+    ops: "btnNavOps",
+    about: "btnNavAbout",
+  };
   for (const [v, id] of Object.entries(map)) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -1169,13 +1177,21 @@ function setAppView(view) {
   const v = view || "explorer";
   document.body.classList.toggle("view-home", v === "home");
   document.body.classList.toggle("view-explorer", v === "explorer");
-  document.body.classList.toggle("view-data", v === "data");
+  document.body.classList.toggle("view-insights", v === "insights");
+  document.body.classList.toggle("view-ops", v === "ops");
+  document.body.classList.toggle("view-about", v === "about");
 
   const briefing = document.getElementById("briefingPanel");
+  const explorerPanel = document.getElementById("explorerPanel");
+  const insightsPanel = document.getElementById("insightsPanel");
+  const aboutPanel = document.getElementById("aboutPanel");
   if (briefing) briefing.classList.toggle("hidden", v !== "home");
+  if (explorerPanel) explorerPanel.classList.toggle("hidden", v !== "explorer");
+  if (insightsPanel) insightsPanel.classList.toggle("hidden", v !== "insights");
+  if (aboutPanel) aboutPanel.classList.toggle("hidden", v !== "about");
   document.body.classList.toggle("mode-briefing", v === "home");
 
-  if (v === "data") {
+  if (v === "ops") {
     const details = document.getElementById("detailsDataStatus");
     if (details) details.open = true;
   }
@@ -1275,7 +1291,7 @@ function generatePolicyCards({ status, station, timeseries, heatByStation }) {
       risk: "短期需採 fallback；長期需權限/路徑確認",
       needs: "external metro_stations.csv 或調整 TDX dataset/path",
       actions: [
-        { label: "Go to Data page", primary: true, type: "nav", view: "data" },
+        { label: "Go to Ops page", primary: true, type: "nav", view: "ops" },
         { label: "Open onboarding", type: "onboarding" },
       ],
     });
@@ -1392,6 +1408,10 @@ function renderBriefing(status, state, { onboarding } = {}) {
   const kpisEl = document.getElementById("briefingKpis");
   const readinessEl = document.getElementById("briefingReadiness");
   const calloutsEl = document.getElementById("briefingCallouts");
+  const homeConclusionEl = document.getElementById("homeConclusion");
+  const homeActionsEl = document.getElementById("homeActions");
+  const homeRainUsageEl = document.getElementById("homeRainUsageCard");
+  const homeRainRiskEl = document.getElementById("homeRainRiskCard");
   const stepperEl = document.getElementById("briefingStepper");
   const stepTitleEl = document.getElementById("briefingStepTitle");
   const stepConclusionEl = document.getElementById("briefingStepConclusion");
@@ -1403,6 +1423,10 @@ function renderBriefing(status, state, { onboarding } = {}) {
     !kpisEl ||
     !readinessEl ||
     !calloutsEl ||
+    !homeConclusionEl ||
+    !homeActionsEl ||
+    !homeRainUsageEl ||
+    !homeRainRiskEl ||
     !stepperEl ||
     !stepTitleEl ||
     !stepConclusionEl ||
@@ -1427,9 +1451,9 @@ function renderBriefing(status, state, { onboarding } = {}) {
     `;
     el.addEventListener("click", () => {
       const label = String(k.label || "").toLowerCase();
-      if (label.includes("bronze")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "data", anchor: "bronze" } }));
-      if (label.includes("silver")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "data", anchor: "silver" } }));
-      if (label.includes("404")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "data" } }));
+      if (label.includes("bronze")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "ops", anchor: "bronze" } }));
+      if (label.includes("silver")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "ops", anchor: "silver" } }));
+      if (label.includes("404")) document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "ops" } }));
     });
     kpisEl.appendChild(el);
   }
@@ -1441,6 +1465,104 @@ function renderBriefing(status, state, { onboarding } = {}) {
   else lines.push("Real data mode：使用本機 Bronze/Silver 產物支撐分析。");
   if (missing) lines.push("目前 Silver 缺檔：請先建立 Silver（可在此頁一鍵啟動）。");
   readinessEl.textContent = lines.join(" ");
+
+  // Home executive summary (story-first; avoids "engineering dashboard" feel)
+  const h = status?.health ?? {};
+  const bronzeAge = h.bronze_bike_availability_age_s != null ? formatAge(h.bronze_bike_availability_age_s) : "—";
+  const silverAge =
+    h.silver_metro_bike_links_age_s != null || h.silver_bike_timeseries_age_s != null
+      ? formatAge(
+          Math.min(
+            Number(h.silver_metro_bike_links_age_s ?? Infinity),
+            Number(h.silver_bike_timeseries_age_s ?? Infinity)
+          )
+        )
+      : "—";
+  const metro404 = Number(h.metro_tdx_404_count ?? 0) || 0;
+  const weather = state?.weatherSummary ?? null;
+  const rainingNow = Boolean(weather?.is_rainy_now);
+  const weatherAge = weather?.heartbeat_age_s != null ? formatAge(weather.heartbeat_age_s) : "—";
+
+  const today = [];
+  today.push(demo ? "Demo mode" : "Real mode");
+  today.push(`Bronze ${bronzeAge}`);
+  today.push(`Silver ${silverAge}`);
+  if (weather) today.push(`Weather ${weather?.stale ? "stale" : "ok"} (${weatherAge})${rainingNow ? " · raining now" : ""}`);
+  if (metro404) today.push(`Metro 404 ×${metro404}`);
+  if (missing) today.push("Silver missing");
+  homeConclusionEl.textContent = today.join(" · ");
+
+  homeActionsEl.innerHTML = "";
+  const addActionBtn = (label, onClick, { primary = false } = {}) => {
+    const b = document.createElement("button");
+    b.className = `btn ${primary ? "btn-primary" : ""}`;
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    homeActionsEl.appendChild(b);
+  };
+  addActionBtn("Open Explorer", () => document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "explorer" } })), {
+    primary: true,
+  });
+  addActionBtn("Open Ops", () => document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "ops" } })));
+  addActionBtn("Toggle heat", () => {
+    const el = document.getElementById("toggleHeat");
+    if (!el) return;
+    el.checked = !el.checked;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  addActionBtn("Enable rain mode", () => {
+    const el = document.getElementById("toggleRainMode");
+    if (!el) return;
+    el.checked = true;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  // Story card: Rain × Usage (24h)
+  const homeUsage = state?.weatherUsage ?? null;
+  if (homeUsage?.precip_total_mm != null && homeUsage?.rent_proxy_total != null) {
+    const p = Number(homeUsage.precip_total_mm);
+    const r = Number(homeUsage.rent_proxy_total);
+    const ret2 = Number(homeUsage.return_proxy_total);
+    const rainyHours = homeUsage.rainy_hours;
+    const city = homeUsage.city || "—";
+    homeRainUsageEl.textContent =
+      `${city} · ` +
+      `${p > 0 ? `rain ${p.toFixed(1)}mm` : "no rain"}` +
+      `${rainyHours != null ? ` · rainy hours ${rainyHours}` : ""}` +
+      ` · rent_proxy ${Number.isFinite(r) ? Math.round(r) : "—"}` +
+      ` · return_proxy ${Number.isFinite(ret2) ? Math.round(ret2) : "—"}`;
+  } else {
+    homeRainUsageEl.textContent = "Weather usage insight not available yet.";
+  }
+
+  // Story card: Rain risk stations (now)
+  const homeRisk = state?.rainRisk ?? null;
+  homeRainRiskEl.innerHTML = "";
+  if (homeRisk?.is_rainy_now && Array.isArray(homeRisk.items) && homeRisk.items.length) {
+    const top = homeRisk.items.slice(0, 5);
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = `Raining now · Top ${top.length} by low nearby availability (click to open in Explorer)`;
+    homeRainRiskEl.appendChild(hint);
+    const row = document.createElement("div");
+    row.className = "row row-actions";
+    for (const it of top) {
+      const b = document.createElement("button");
+      b.className = "btn";
+      const val = Number(it.mean_available_bikes);
+      b.textContent = `${it.name || it.station_id} · ${Number.isFinite(val) ? Math.round(val) : "—"}`;
+      b.addEventListener("click", () =>
+        document.body.dispatchEvent(new CustomEvent("focus_station", { detail: { station_id: it.station_id } }))
+      );
+      row.appendChild(b);
+    }
+    homeRainRiskEl.appendChild(row);
+  } else {
+    const msg = document.createElement("div");
+    msg.className = "hint";
+    msg.textContent = rainingNow ? "Raining now, but rain-risk list is empty." : "Not raining now.";
+    homeRainRiskEl.appendChild(msg);
+  }
 
   // Policy cards
   const station = state?.stationById?.get?.(state?.selectedStationId) ?? null;
@@ -1774,9 +1896,10 @@ async function main() {
 
   configureChartsTheme();
 
-  // View (Home / Explorer / Data) with backward-compatible migration from older `ui_mode`.
+  // View (Home / Explorer / Insights / Ops / About) with backward-compatible migration from older `ui_mode`.
   if (state.settings.app_view == null) state.settings.app_view = "explorer";
   if (state.settings.ui_mode === "briefing") state.settings.app_view = "home";
+  if (state.settings.app_view === "data") state.settings.app_view = "ops";
   setAppView(state.settings.app_view);
 
   function setView(view, { anchor } = {}) {
@@ -1786,6 +1909,13 @@ async function main() {
     if (view === "home" && state.lastStatusSnapshot) {
       renderBriefing(state.lastStatusSnapshot, state, { onboarding });
       refreshSnapshots();
+    }
+    if (view === "insights") {
+      refreshInsightsLists({ quiet: true }).catch(() => {});
+    }
+    if (view === "ops") {
+      const details = document.getElementById("detailsDataStatus");
+      if (details) details.open = true;
     }
     if (anchor) {
       const details = document.getElementById("detailsDataStatus");
@@ -1806,7 +1936,9 @@ async function main() {
 
   document.getElementById("btnNavHome").addEventListener("click", () => setView("home"));
   document.getElementById("btnNavExplorer").addEventListener("click", () => setView("explorer"));
-  document.getElementById("btnNavData").addEventListener("click", () => setView("data"));
+  document.getElementById("btnNavInsights").addEventListener("click", () => setView("insights"));
+  document.getElementById("btnNavOps").addEventListener("click", () => setView("ops"));
+  document.getElementById("btnNavAbout").addEventListener("click", () => setView("about"));
 
   document.body.addEventListener("nav", (ev) => {
     const d = ev.detail || {};
@@ -2211,11 +2343,18 @@ async function main() {
       setStatusPanel(payload);
       if (state.settings.app_view === "home") renderBriefing(payload, state, { onboarding });
       refreshMeta({ quiet: true }).catch(() => {});
-      // These panels are localhost-only; ignore failures when opened remotely.
-      refreshJobs({ quiet: true }).catch(() => {});
-      refreshExternalMetro({ quiet: true }).catch(() => {});
-      refreshExternalCalendar({ quiet: true }).catch(() => {});
-      refreshExternalWeather({ quiet: true }).catch(() => {});
+      // These panels are localhost/token-only. Avoid issuing requests (and noisy 403s) unless user is in Ops.
+      const details = document.getElementById("detailsDataStatus");
+      const wantsAdmin =
+        state.settings.app_view === "ops" ||
+        Boolean(details?.open) ||
+        Boolean(getAdminToken());
+      if (wantsAdmin) {
+        refreshJobs({ quiet: true }).catch(() => {});
+        refreshExternalMetro({ quiet: true }).catch(() => {});
+        refreshExternalCalendar({ quiet: true }).catch(() => {});
+        refreshExternalWeather({ quiet: true }).catch(() => {});
+      }
       // Narrative insights for Home page
       refreshHotspots({ quiet: true }).catch(() => {});
       refreshWeatherInsights({ quiet: true }).catch(() => {});
@@ -2294,6 +2433,154 @@ async function main() {
       if (!quiet) setStatusText("Insights updated");
     } catch {
       state.lastHotspots = null;
+    }
+  }
+
+  async function refreshInsightsLists({ quiet = false } = {}) {
+    const root = document.getElementById("insightsList");
+    const modeEl = document.getElementById("insightsMode");
+    const topKEl = document.getElementById("insightsTopK");
+    if (!root || !modeEl || !topKEl) return;
+
+    const mode = String(modeEl.value || state.settings.insights_mode || "hotspots");
+    const topK = clamp(Number(topKEl.value || state.settings.insights_top_k || 10), 1, 50);
+    state.settings.insights_mode = mode;
+    state.settings.insights_top_k = topK;
+    persistSettings();
+
+    root.innerHTML = `<div class="hint">Loading…</div>`;
+
+    const latestTs = async () => {
+      if (!state.heatIndex.length) await refreshHeatIndex();
+      return state.heatIndex[state.heatIndex.length - 1] ?? null;
+    };
+
+    const renderList = (title, items, { valueLabel = "value" } = {}) => {
+      const wrap = document.createElement("div");
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = `${title} · Top ${items.length}`;
+      wrap.appendChild(h);
+
+      const list = document.createElement("ul");
+      list.className = "list";
+      for (const it of items) {
+        const li = document.createElement("li");
+        li.style.display = "flex";
+        li.style.justifyContent = "space-between";
+        li.style.gap = "10px";
+        li.style.alignItems = "center";
+        const left = document.createElement("div");
+        left.style.minWidth = "0";
+        const name = document.createElement("div");
+        name.style.fontWeight = "700";
+        name.style.fontSize = "12px";
+        name.style.overflow = "hidden";
+        name.style.textOverflow = "ellipsis";
+        name.style.whiteSpace = "nowrap";
+        name.textContent = it.name || it.station_id || it.id || "—";
+        const meta = document.createElement("div");
+        meta.className = "hint mono";
+        meta.style.margin = "2px 0 0 0";
+        meta.textContent = `${valueLabel}: ${it.value_txt ?? it.value ?? "—"}`;
+        left.appendChild(name);
+        left.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.className = "row row-actions";
+        actions.style.margin = "0";
+        const btnFocus = document.createElement("button");
+        btnFocus.className = "btn";
+        btnFocus.textContent = "Focus";
+        btnFocus.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = it.station_id || it.id;
+          if (!id) return;
+          selectStationById(id, { focus: true });
+        });
+        const btnOpen = document.createElement("button");
+        btnOpen.className = "btn btn-primary";
+        btnOpen.textContent = "Open";
+        btnOpen.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = it.station_id || it.id;
+          if (!id) return;
+          document.body.dispatchEvent(new CustomEvent("focus_station", { detail: { station_id: id } }));
+        });
+        actions.appendChild(btnFocus);
+        actions.appendChild(btnOpen);
+
+        li.appendChild(left);
+        li.appendChild(actions);
+        li.addEventListener("click", () => {
+          const id = it.station_id || it.id;
+          if (!id) return;
+          selectStationById(id, { focus: true });
+        });
+        list.appendChild(li);
+      }
+      wrap.appendChild(list);
+      return wrap;
+    };
+
+    try {
+      const city = state.lastStatusSnapshot?.tdx?.bike_cities?.[0] ?? "Taipei";
+      const ts = await latestTs();
+
+      let items = [];
+      let title = mode;
+      let valueLabel = "value";
+
+      if (mode === "hotspots" || mode === "coldspots") {
+        if (!ts) throw new Error("Heat index is empty");
+        const payload = await fetchJson(
+          `/insights/hotspots${qs({ metric: state.settings.heat_metric, agg: state.settings.heat_agg, ts, top_k: topK })}`
+        );
+        state.lastHotspots = payload;
+        items = (mode === "hotspots" ? payload?.hot : payload?.cold) ?? [];
+        title = mode === "hotspots" ? "Hotspots" : "Coldspots";
+        valueLabel = `${state.settings.heat_metric} (${state.settings.heat_agg})`;
+      } else if (mode === "shortage" || mode === "pressure") {
+        if (!ts) throw new Error("Heat index is empty");
+        const metric = mode === "shortage" ? "available" : "rent_proxy";
+        const m = await ensureHeatMetric(String(ts), metric, "sum");
+        const pairs = [];
+        for (const [id, value] of m.entries()) {
+          const station = state.stationById.get(id);
+          pairs.push({
+            station_id: id,
+            name: station?.name ?? id,
+            value,
+            value_txt: Number.isFinite(Number(value)) ? String(Math.round(Number(value))) : "—",
+          });
+        }
+        pairs.sort((a, b) => (mode === "shortage" ? Number(a.value) - Number(b.value) : Number(b.value) - Number(a.value)));
+        items = pairs.filter((p) => Number.isFinite(Number(p.value))).slice(0, topK);
+        title = mode === "shortage" ? "Shortage (low availability)" : "Pressure (high rent_proxy)";
+        valueLabel = metric;
+      } else if (mode === "rainy_risk") {
+        const payload = await fetchJson(`/insights/rain_risk_now${qs({ city, top_k: topK })}`);
+        state.rainRisk = payload;
+        items =
+          (payload?.items ?? []).map((it) => ({
+            station_id: it.station_id,
+            name: it.name || it.station_id,
+            value: it.mean_available_bikes,
+            value_txt:
+              it.mean_available_bikes != null && Number.isFinite(Number(it.mean_available_bikes))
+                ? String(Math.round(Number(it.mean_available_bikes)))
+                : "—",
+          })) ?? [];
+        title = payload?.is_rainy_now ? "Rainy-risk stations (now)" : "Rainy-risk stations (not raining now)";
+        valueLabel = "mean_available";
+      }
+
+      root.innerHTML = "";
+      const block = renderList(title, items, { valueLabel });
+      root.appendChild(block);
+      if (!quiet) setStatusText("Insights list updated");
+    } catch (e) {
+      root.innerHTML = `<div class="hint">Insights unavailable (${e.message})</div>`;
     }
   }
 
@@ -2595,6 +2882,13 @@ async function main() {
   }
 
   document.getElementById("btnRefreshStatus").addEventListener("click", () => refreshStatus({ quiet: false }));
+  // Insights tab controls
+  document.getElementById("btnRefreshInsights")?.addEventListener("click", () => refreshInsightsLists({ quiet: false }));
+  document.getElementById("btnInsightsToExplorer")?.addEventListener("click", () =>
+    document.body.dispatchEvent(new CustomEvent("nav", { detail: { view: "explorer" } }))
+  );
+  document.getElementById("insightsMode")?.addEventListener("change", () => refreshInsightsLists({ quiet: true }));
+  document.getElementById("insightsTopK")?.addEventListener("change", () => refreshInsightsLists({ quiet: true }));
   document.getElementById("btnCopyDataMeta").addEventListener("click", async () => {
     const payload = state.lastDataMeta || { stations_meta: state.stationsMeta, silver_build_meta: state.silverBuildMeta };
     try {
@@ -2864,7 +3158,7 @@ async function main() {
   setStatusPolling(30000);
   startEventStream();
 
-  function applySettingsToControls() {
+	  function applySettingsToControls() {
     document.getElementById("joinMethodSelect").value = state.settings.join_method;
     document.getElementById("granularitySelect").value = state.settings.granularity;
 
@@ -2893,13 +3187,18 @@ async function main() {
     document.getElementById("problemTopN").value = String(Number(state.settings.problem_top_n) || 10);
     document.getElementById("toggleBuffer").checked = Boolean(state.settings.show_buffer);
     document.getElementById("toggleLinks").checked = Boolean(state.settings.show_links);
-    document.getElementById("toggleLive").checked = Boolean(state.settings.live);
-    document.getElementById("liveInterval").value = String(state.settings.live_interval_sec);
+	    document.getElementById("toggleLive").checked = Boolean(state.settings.live);
+	    document.getElementById("liveInterval").value = String(state.settings.live_interval_sec);
 
-    const showRadius = state.settings.join_method === "buffer";
-    toggleHidden(document.getElementById("radiusField"), !showRadius);
-    toggleHidden(document.getElementById("nearestField"), showRadius);
-  }
+	    const insightsMode = document.getElementById("insightsMode");
+	    const insightsTopK = document.getElementById("insightsTopK");
+	    if (insightsMode) insightsMode.value = String(state.settings.insights_mode || "hotspots");
+	    if (insightsTopK) insightsTopK.value = String(Number(state.settings.insights_top_k) || 10);
+
+	    const showRadius = state.settings.join_method === "buffer";
+	    toggleHidden(document.getElementById("radiusField"), !showRadius);
+	    toggleHidden(document.getElementById("nearestField"), showRadius);
+	  }
 
   function persistSettings() {
     storeJson("metrobikeatlas.settings.v1", state.settings);
