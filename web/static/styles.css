@@ -1064,6 +1064,7 @@ input[type="range"] {
   padding: 10px;
   position: relative;
   min-height: 220px;
+  overflow: hidden;
 }
 
 .chart-title {

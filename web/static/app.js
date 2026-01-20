@@ -209,7 +209,11 @@ function toChartData(points) {
   };
 }
 
-function buildChart(canvas, label) {
+function buildChart(canvas, label, { heightPx = 190 } = {}) {
+  if (canvas) {
+    canvas.style.width = "100%";
+    canvas.style.height = `${Math.max(80, Number(heightPx) || 190)}px`;
+  }
   return new Chart(canvas, {
     type: "line",
     data: {
@@ -2115,13 +2119,14 @@ async function main() {
   const heatMeta = document.getElementById("heatMeta");
   const mapLegend = document.getElementById("mapLegend");
 
-  function setOverlayVisible(visible, text) {
-    const el = document.getElementById("loadingOverlay");
-    const t = document.getElementById("overlayText");
-    if (t && text) t.textContent = text;
-    el.classList.toggle("hidden", !visible);
-    el.setAttribute("aria-hidden", visible ? "false" : "true");
-  }
+	  function setOverlayVisible(visible, text) {
+	    const el = document.getElementById("loadingOverlay");
+	    const t = document.getElementById("overlayText");
+	    if (t && text) t.textContent = text;
+	    el.classList.toggle("hidden", !visible);
+	    el.setAttribute("aria-hidden", visible ? "false" : "true");
+	    el.hidden = !visible;
+	  }
 
   function heatColor(value, maxValue) {
     const v = Number(value);
@@ -2326,9 +2331,9 @@ async function main() {
     document.getElementById("statusCoords").textContent = `lat=${c.lat.toFixed(4)} lon=${c.lng.toFixed(4)} z=${map.getZoom()}`;
   });
 
-  const metroChart = buildChart(document.getElementById("metroChart"), "metro");
-  const bikeChart = buildChart(document.getElementById("bikeChart"), "bike");
-  state.briefingChart = buildChart(document.getElementById("briefingChart"), "brief");
+  const metroChart = buildChart(document.getElementById("metroChart"), "metro", { heightPx: 190 });
+  const bikeChart = buildChart(document.getElementById("bikeChart"), "bike", { heightPx: 190 });
+  state.briefingChart = buildChart(document.getElementById("briefingChart"), "brief", { heightPx: 180 });
   if (state.briefingChart) {
     state.briefingChart.options.scales.x.ticks.maxTicksLimit = 4;
     state.briefingChart.options.scales.y.ticks = { maxTicksLimit: 4 };
