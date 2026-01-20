@@ -210,10 +210,9 @@ function toChartData(points) {
 }
 
 function buildChart(canvas, label, { heightPx = 190 } = {}) {
-  if (canvas) {
-    canvas.style.width = "100%";
-    canvas.style.height = `${Math.max(80, Number(heightPx) || 190)}px`;
-  }
+  if (!canvas) return null;
+  canvas.style.width = "100%";
+  canvas.style.height = `${Math.max(80, Number(heightPx) || 190)}px`;
   return new Chart(canvas, {
     type: "line",
     data: {
@@ -1936,13 +1935,13 @@ async function main() {
     }
   });
 
-  document.getElementById("btnBriefingStartCollector").addEventListener("click", () =>
-    document.getElementById("btnStartCollector").click()
+  document.getElementById("btnBriefingStartCollector")?.addEventListener("click", () =>
+    document.getElementById("btnStartCollector")?.click()
   );
-  document.getElementById("btnBriefingBuildSilver").addEventListener("click", () =>
-    document.getElementById("btnBuildSilver").click()
+  document.getElementById("btnBriefingBuildSilver")?.addEventListener("click", () =>
+    document.getElementById("btnBuildSilver")?.click()
   );
-  document.getElementById("btnBriefingCopy").addEventListener("click", async () => {
+  document.getElementById("btnBriefingCopy")?.addEventListener("click", async () => {
     const status = state.lastStatusSnapshot ?? null;
     const station = state.stationById.get(state.selectedStationId) ?? null;
     const lines = [];
@@ -1963,8 +1962,8 @@ async function main() {
       setStatusText("Copy failed");
     }
   });
-  document.getElementById("btnBriefingSave").addEventListener("click", () => saveSnapshot());
-  document.getElementById("btnBriefingDownload").addEventListener("click", () => downloadBriefingExport("zip"));
+  document.getElementById("btnBriefingSave")?.addEventListener("click", () => saveSnapshot());
+  document.getElementById("btnBriefingDownload")?.addEventListener("click", () => downloadBriefingExport("zip"));
 
   async function refreshSnapshots() {
     const select = document.getElementById("snapshotSelect");
@@ -2002,8 +2001,8 @@ async function main() {
     if (state.lastStatusSnapshot) renderBriefing(state.lastStatusSnapshot, state, { onboarding });
   }
 
-  document.getElementById("btnSnapshotRefresh").addEventListener("click", () => refreshSnapshots());
-  document.getElementById("btnSnapshotLoad").addEventListener("click", async () => {
+  document.getElementById("btnSnapshotRefresh")?.addEventListener("click", () => refreshSnapshots());
+  document.getElementById("btnSnapshotLoad")?.addEventListener("click", async () => {
     const select = document.getElementById("snapshotSelect");
     const id = select?.value;
     if (!id) return;
