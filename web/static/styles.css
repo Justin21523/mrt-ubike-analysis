@@ -980,9 +980,23 @@ input[type="range"] {
   margin-bottom: 6px;
 }
 
-canvas {
+/* Avoid using % heights on canvas without a fixed parent height (can cause runaway growth). */
+.chart-card {
+  height: 240px;
+}
+
+.chart-card canvas {
   width: 100% !important;
-  height: calc(100% - 20px) !important;
+  height: 190px !important;
+}
+
+.briefing-viz-wrap {
+  height: 220px;
+}
+
+.briefing-viz-wrap canvas {
+  width: 100% !important;
+  height: 180px !important;
 }
 
 .list {
