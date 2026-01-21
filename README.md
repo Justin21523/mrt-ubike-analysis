@@ -46,10 +46,11 @@ Every page shows a thin header with:
 
 ### Playwright smoke + screenshots
 
-This repo includes a deterministic Playwright smoke runner that captures screenshots (it stubs CDN assets like Leaflet/Chart.js):
+This repo includes a deterministic Playwright smoke runner that captures screenshots (it stubs CDN assets like Leaflet/Chart.js and also stubs OSM tiles so the Explorer map is always visible in screenshots):
 
 - Run (starts API automatically): `python scripts/ui_playwright_smoke.py --start-api --out-dir docs/screenshots`
 - Or run against an existing server: `python scripts/ui_playwright_smoke.py --base-url http://127.0.0.1:8000 --out-dir docs/screenshots`
+- To use real Leaflet/Chart.js instead of stubs: add `--no-stub-leaflet --no-stub-chartjs`
 
 If your environment doesn’t have browsers installed yet:
 

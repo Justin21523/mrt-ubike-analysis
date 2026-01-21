@@ -78,10 +78,42 @@ def _terminate(proc: subprocess.Popen[bytes], timeout_s: float = 8.0) -> None:
 def _stub_leaflet(route: Route) -> None:
     url = route.request.url
     if url.endswith(".css"):
-        route.fulfill(status=200, content_type="text/css", body="/* stub leaflet */")
+        css = """
+        /* Minimal Leaflet stub so the Explorer page shows a visible "map" in screenshots. */
+        .leaflet-container { position: relative; overflow: hidden; background: #f3f4f6; }
+        .leaflet-pane { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+        .leaflet-tile-pane { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+        .leaflet-tile {
+          position: absolute;
+          width: 256px;
+          height: 256px;
+          background: repeating-linear-gradient(0deg, #e5e7eb, #e5e7eb 1px, #f9fafb 1px, #f9fafb 32px),
+                      repeating-linear-gradient(90deg, #e5e7eb, #e5e7eb 1px, transparent 1px, transparent 32px);
+          opacity: 0.95;
+        }
+        .leaflet-control-container { display: none; }
+        """
+        route.fulfill(status=200, content_type="text/css", body=css)
         return
     js = """
       (function(){
+        function ensureDom(el){
+          if (!el) return;
+          el.classList.add('leaflet-container');
+          el.setAttribute('data-leaflet-ready', '1');
+          if (el.querySelector('.leaflet-pane')) return;
+          var pane = document.createElement('div');
+          pane.className = 'leaflet-pane';
+          var tilePane = document.createElement('div');
+          tilePane.className = 'leaflet-tile-pane';
+          var tile = document.createElement('div');
+          tile.className = 'leaflet-tile leaflet-tile-loaded';
+          tile.style.left = '0px';
+          tile.style.top = '0px';
+          tilePane.appendChild(tile);
+          pane.appendChild(tilePane);
+          el.appendChild(pane);
+        }
         function Layer(){ this._layers=[]; }
         Layer.prototype.addTo=function(){ return this; };
         Layer.prototype.clearLayers=function(){ this._layers=[]; };
@@ -92,13 +124,16 @@ def _stub_leaflet(route: Route) -> None:
         Marker.prototype.setTooltipContent=function(html){ this._tooltip = html; return this; };
         Marker.prototype.on=function(ev, fn){ this._handlers[ev]=fn; return this; };
         Marker.prototype.addTo=function(){ return this; };
-        function Map(){ this._center=[0,0]; this._z=12; this._handlers={}; }
-        Map.prototype.setView=function(c,z){ this._center=c; this._z=z; return this; };
+        function Map(el){ this._el=el; this._center=[0,0]; this._z=12; this._handlers={}; ensureDom(el); }
+        Map.prototype.setView=function(c,z){ this._center=c; this._z=z; ensureDom(this._el); return this; };
         Map.prototype.on=function(ev, fn){ this._handlers[ev]=fn; return this; };
         Map.prototype.getCenter=function(){ return { lat:this._center[0], lng:this._center[1] }; };
         Map.prototype.getZoom=function(){ return this._z; };
         window.L = {
-          map: function(){ return new Map(); },
+          map: function(idOrEl){
+            var el = (typeof idOrEl === 'string') ? document.getElementById(idOrEl) : idOrEl;
+            return new Map(el);
+          },
           tileLayer: function(){ return new Layer(); },
           layerGroup: function(){ return new Layer(); },
           circleMarker: function(){ return new Marker(); },
@@ -119,21 +154,26 @@ def _stub_chartjs(route: Route) -> None:
     route.fulfill(status=200, content_type="application/javascript", body=js)
 
 
-_PNG_1X1_WHITE = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
-    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x82\x81\x8d\x00\x00\x00\x00IEND\xaeB`\x82"
-)
-
-
 def _stub_osm_tiles(route: Route) -> None:
     # Deterministic placeholder: avoids network dependency while still rendering a "map-like" base layer.
-    route.fulfill(status=200, content_type="image/png", body=_PNG_1X1_WHITE)
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
+      <defs>
+        <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+          <rect width="32" height="32" fill="#f9fafb"/>
+          <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect width="256" height="256" fill="url(#grid)"/>
+      <path d="M0 128 H256 M128 0 V256" stroke="#d1d5db" stroke-width="2" opacity="0.7"/>
+    </svg>"""
+    route.fulfill(status=200, content_type="image/svg+xml", body=svg)
 
 
 def _iter_shots() -> Iterator[PageShot]:
     yield PageShot("home", "/home", "#homeCards")
     yield PageShot("insights", "/insights", "#insightsCards")
-    yield PageShot("explorer", "/explorer", "#map")
+    # Wait for actual Leaflet render (real or stubbed) so screenshots include a visible map.
+    yield PageShot("explorer", "/explorer", "#map .leaflet-tile")
     yield PageShot("ops", "/ops", "#opsCards")
     yield PageShot("about", "/about", "main.page")
 
@@ -148,8 +188,18 @@ def main() -> int:
         default="home,insights,explorer,ops,about",
         help="Comma-separated page names to capture (home,insights,explorer,ops,about)",
     )
-    ap.add_argument("--stub-leaflet", action="store_true", help="Stub Leaflet assets (for offline/deterministic runs)")
-    ap.add_argument("--stub-chartjs", action="store_true", default=True, help="Stub Chart.js (deterministic)")
+    ap.add_argument(
+        "--stub-leaflet",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stub Leaflet assets (offline/deterministic; use --no-stub-leaflet to load real Leaflet)",
+    )
+    ap.add_argument(
+        "--stub-chartjs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stub Chart.js (deterministic; use --no-stub-chartjs to load real Chart.js)",
+    )
     ap.add_argument("--timeout-s", type=float, default=60.0)
     args = ap.parse_args()
 
