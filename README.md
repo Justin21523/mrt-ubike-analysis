@@ -21,6 +21,44 @@ The web UI is served at `http://127.0.0.1:8000/`.
 
 Tip: press `?` in the UI to see keyboard shortcuts (W/A/S/D pan, Q/E zoom, etc.).
 
+## UI (multi-page briefing)
+
+The UI is now multi-page (separate URLs), with a story-first briefing feel:
+
+- `GET /home` · executive brief (scenario + story stepper + policy option cards)
+- `GET /insights` · evidence list + 1-sentence “why”, with one-click jump to Explorer
+- `GET /explorer` · map + evidence (charts, nearby bikes), focused on exploration/validation
+- `GET /ops` · operations (jobs, admin actions, external inputs)
+- `GET /about` · methods & limitations
+
+Every page shows a thin header with:
+
+- `demo/real`
+- data freshness age (Bronze/Silver)
+- `build <id>` short code
+
+### Screenshots
+
+![Home](docs/screenshots/home.png)
+![Explorer](docs/screenshots/explorer.png)
+![Insights](docs/screenshots/insights.png)
+![Ops](docs/screenshots/ops.png)
+
+### Playwright smoke + screenshots
+
+This repo includes a deterministic Playwright smoke runner that captures screenshots (it stubs CDN assets like Leaflet/Chart.js):
+
+- Run (starts API automatically): `python scripts/ui_playwright_smoke.py --start-api --out-dir docs/screenshots`
+- Or run against an existing server: `python scripts/ui_playwright_smoke.py --base-url http://127.0.0.1:8000 --out-dir docs/screenshots`
+
+If your environment doesn’t have browsers installed yet:
+
+- `python -m playwright install chromium`
+
+Optional pytest UI smoke test (skipped by default):
+
+- `RUN_UI_TESTS=1 pytest -q tests/test_ui_playwright_smoke.py`
+
 ## Demo mode vs real data mode
 
 - Demo mode (`config/default.json` → `app.demo_mode=true`) works without TDX credentials and always shows a metro + bike chart.
