@@ -1872,11 +1872,11 @@ export async function runExplorer() {
   const storedSettings = loadStoredJson("metrobikeatlas.settings.v1");
   const settings = mergeSettings(defaultSettingsFromConfig(cfg), storedSettings);
 
-  const state = {
-    cfg,
-    settings,
-    stations: [],
-    stationById: new Map(),
+	  const state = {
+	    cfg,
+	    settings,
+	    stations: [],
+	    stationById: new Map(),
     selectedStationId: null,
     lastTimeseries: null,
     lastNearby: null,
@@ -1889,11 +1889,16 @@ export async function runExplorer() {
     briefingChart: null,
     heatIndex: [],
     heatByStation: new Map(),
-    lastHotspots: null,
-    weatherUsage: null,
-    rainRisk: null,
-    weatherSummary: null,
-  };
+	    lastHotspots: null,
+	    weatherUsage: null,
+	    rainRisk: null,
+	    weatherSummary: null,
+	    // Used to keep labels informative even when heat layer is hidden.
+	    labelMetaTs: null,
+	    labelByStation: new Map(),
+	    // Focus mode visuals.
+	    problemHaloById: new Map(),
+	  };
   // Allow small UI helpers outside `main()` (e.g. status panel) to read current meta.
   window.__mba_state = state;
 
@@ -2099,10 +2104,11 @@ export async function runExplorer() {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
 
-  const metroLayer = L.layerGroup().addTo(map);
-  const bikeLayer = L.layerGroup().addTo(map);
-  const linkLayer = L.layerGroup().addTo(map);
-  let bufferCircle = null;
+	  const metroLayer = L.layerGroup().addTo(map);
+	  const bikeLayer = L.layerGroup().addTo(map);
+	  const linkLayer = L.layerGroup().addTo(map);
+	  const haloLayer = L.layerGroup().addTo(map);
+	  let bufferCircle = null;
   const heatLegend = document.getElementById("heatLegend");
   const heatMeta = document.getElementById("heatMeta");
   const mapLegend = document.getElementById("mapLegend");
@@ -2160,6 +2166,19 @@ export async function runExplorer() {
       const safe = clamp(idx, 0, state.heatIndex.length - 1);
       slider.value = String(safe);
       label.textContent = fmtTs(state.heatIndex[safe]);
+
+      // Preload a stable label metric (available/sum) at the latest timestamp so marker labels stay meaningful
+      // even when Heat is toggled off.
+      try {
+        const latest = state.heatIndex[state.heatIndex.length - 1] ?? null;
+        if (latest) {
+          state.labelMetaTs = latest;
+          const m = await ensureHeatMetric(latest, "available", "sum");
+          if (m) state.labelByStation = new Map(m);
+        }
+      } catch {
+        // ignore
+      }
     } catch {
       slider.disabled = true;
       label.textContent = "Heat unavailable";
@@ -2201,6 +2220,9 @@ export async function runExplorer() {
     const focusTxt =
       focus ? `Focus: ${mode} · Top ${topN}` : "Tip: enable Heat or Focus for highlights.";
     const rainTxt = rainMode ? (rainyNow ? "Rain mode: ON (raining now)" : "Rain mode: ON") : "Rain mode: OFF";
+    const labelMetric = show ? `${metric} (${agg})` : "available (sum)";
+    const labelTs = show ? updated : (state.labelMetaTs ? fmtTs(state.labelMetaTs) : "—");
+    const labelWhat = `Label number: ${labelMetric} @ ${labelTs}`;
 
     mapLegend.innerHTML = `
       <div class="legend-kicker">Map legend</div>
@@ -2214,6 +2236,10 @@ export async function runExplorer() {
         <div class="legend-text">${focusTxt}</div>
       </div>
       <div class="legend-row">
+        <span class="legend-swatch" style="background: rgba(15,23,42,0.04); border-color: rgba(15,23,42,0.14);"></span>
+        <div class="legend-text">${labelWhat}</div>
+      </div>
+      <div class="legend-row">
         <span class="legend-swatch" style="background: rgba(22,163,74,0.16);"></span>
         <div class="legend-text">${rainTxt}</div>
       </div>
@@ -2221,29 +2247,118 @@ export async function runExplorer() {
     `;
   }
 
+  function valueTone(metric, value) {
+    const v = Number(value);
+    if (!Number.isFinite(v)) return "muted";
+    if (metric === "available") {
+      if (v <= 2) return "bad";
+      if (v <= 6) return "warn";
+      return "ok";
+    }
+    // For proxy metrics: higher means higher pressure (warn/bad).
+    if (v >= 40) return "bad";
+    if (v >= 20) return "warn";
+    return "ok";
+  }
+
   function markerLabel({ station, value, showValue }) {
     const name = stationShortName(station?.name);
-    if (!showValue) return name;
+    if (!showValue) return `<span class="sl-name">${name}</span>`;
     const v = Number(value);
     const valTxt = Number.isFinite(v) ? String(Math.round(v)) : "—";
-    return `${name} ${valTxt}`;
+    const metric = String(state.settings.show_bike_heat ? state.settings.heat_metric : "available");
+    const tone = valueTone(metric, v);
+    const cls = tone === "muted" ? "" : ` ${tone}`;
+    return `<span class="sl-name">${name}</span><span class="sl-val${cls}">${valTxt}</span>`;
+  }
+
+  function setMarkerTooltip(marker, html) {
+    try {
+      marker.setTooltipContent(html);
+    } catch {}
+  }
+
+  function clearHaloLayer() {
+    haloLayer.clearLayers();
+    state.problemHaloById.clear();
+  }
+
+  function updateProblemHalos(highlightIds, { mode } = {}) {
+    clearHaloLayer();
+    const ids = Array.isArray(highlightIds) ? highlightIds : [];
+    if (!ids.length) return;
+    const m = String(mode || state.settings.problem_mode || "shortage");
+    const stroke =
+      m === "pressure" ? "rgba(225,29,72,0.70)" : m === "rainy_risk" ? "rgba(13,148,136,0.70)" : "rgba(217,119,6,0.75)";
+    for (const id of ids) {
+      const s = state.stationById.get(id);
+      if (!s) continue;
+      const halo = L.circleMarker([s.lat, s.lon], {
+        radius: 16,
+        color: stroke,
+        weight: 3,
+        opacity: 0.9,
+        fillOpacity: 0.0,
+        interactive: false,
+      });
+      halo.addTo(haloLayer);
+      state.problemHaloById.set(id, halo);
+    }
+  }
+
+  function renderProblemList({ ids, valueById, valueLabel }) {
+    const list = document.getElementById("problemList");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!state.settings.problem_focus) {
+      list.innerHTML = `<li class="hint">Enable Focus to see Top N.</li>`;
+      return;
+    }
+    const ordered = Array.isArray(ids) ? ids : [];
+    if (!ordered.length) {
+      list.innerHTML = `<li class="hint">No items yet. Try a different mode or wait for heat index.</li>`;
+      return;
+    }
+    for (const id of ordered) {
+      const s = state.stationById.get(id);
+      if (!s) continue;
+      const v = valueById?.get ? valueById.get(id) : null;
+      const li = document.createElement("li");
+      li.style.cursor = "pointer";
+      li.innerHTML = `
+        <div style="min-width:0;">
+          <div style="font-weight:800; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.name}</div>
+          <div class="hint mono" style="margin:2px 0 0 0;">${valueLabel}: ${Number.isFinite(Number(v)) ? Math.round(Number(v)) : "—"}</div>
+        </div>
+      `;
+      li.addEventListener("click", () => {
+        if (state.settings.right_collapsed) {
+          setSetting("right_collapsed", false);
+          updatePanelsCollapsed();
+        }
+        document.body.dispatchEvent(new CustomEvent("focus_station", { detail: { station_id: id } }));
+        pushAction({ level: "ok", title: "Focus", message: `Opened ${s.name} · Next: read Charts & Nearby bikes.` });
+      });
+      list.appendChild(li);
+    }
   }
 
   function applyHeatToMarkers() {
     const show = Boolean(state.settings.show_bike_heat);
     heatLegend.classList.toggle("hidden", !show);
     if (!show) {
+      clearHaloLayer();
       for (const s of state.stations) {
         const marker = state.metroMarkerById?.get?.(s.id);
         if (!marker) continue;
         const c = clusterColor(s.cluster);
         const selected = s.id === state.selectedStationId;
         marker.setStyle({ color: c, fillColor: c, fillOpacity: 0.9, opacity: 1.0, weight: selected ? 5 : 2, radius: selected ? 9 : 6 });
-        try {
-          marker.setTooltipContent(markerLabel({ station: s, value: null, showValue: false }));
-        } catch {}
+        const labelV = state.labelByStation?.get?.(s.id);
+        setMarkerTooltip(marker, markerLabel({ station: s, value: labelV, showValue: true }));
       }
       updateMapLegend({ showHeat: false, maxVal: null });
+      renderProblemList({ ids: [], valueById: null, valueLabel: "value" });
       return;
     }
     const legendTitle = heatLegend.querySelector(".legend-title");
@@ -2260,11 +2375,17 @@ export async function runExplorer() {
     const topN = clamp(Number(state.settings.problem_top_n) || 10, 1, 50);
 
     let highlight = null;
+    let highlightIds = [];
+    let highlightValueById = null;
+    let highlightValueLabel = null;
     if (focus) {
       highlight = new Set();
       if (mode === "rainy_risk") {
         const ids = (state.rainRisk?.items ?? []).map((it) => it.station_id).filter(Boolean).slice(0, topN);
+        highlightIds = ids.slice();
         for (const id of ids) highlight.add(id);
+        highlightValueById = new Map((state.rainRisk?.items ?? []).map((it) => [it.station_id, it.value]));
+        highlightValueLabel = "rain_risk";
       } else {
         const wantMetric = mode === "pressure" ? "rent_proxy" : "available";
         const tsIdx = Number(document.getElementById("heatTimeRange")?.value ?? 0);
@@ -2285,7 +2406,10 @@ export async function runExplorer() {
             pairs.push([s.id, v]);
           }
           pairs.sort((a, b) => (wantMetric === "available" ? a[1] - b[1] : b[1] - a[1]));
-          for (const [id] of pairs.slice(0, topN)) highlight.add(id);
+          highlightIds = pairs.slice(0, topN).map((p) => p[0]);
+          for (const id of highlightIds) highlight.add(id);
+          highlightValueById = map;
+          highlightValueLabel = wantMetric;
         }
       }
     }
@@ -2307,10 +2431,14 @@ export async function runExplorer() {
         weight: selected ? 6 : deemphasize ? 1 : isHot ? 4 : 3,
         radius: selected ? 10 : deemphasize ? 5 : isHot ? 9 : 7,
       });
-      try {
-        marker.setTooltipContent(markerLabel({ station: s, value: val, showValue: !deemphasize }));
-      } catch {}
+      setMarkerTooltip(marker, markerLabel({ station: s, value: val, showValue: true }));
     }
+    updateProblemHalos(highlightIds, { mode });
+    renderProblemList({
+      ids: highlightIds,
+      valueById: highlightValueById,
+      valueLabel: highlightValueLabel || metric,
+    });
     updateMapLegend({ showHeat: true, maxVal });
   }
 
@@ -2381,21 +2509,22 @@ export async function runExplorer() {
     }
   }
 
-  async function refreshWeatherInsights({ quiet = false } = {}) {
-    const city = state.lastStatusSnapshot?.tdx?.bike_cities?.[0] ?? state.stationById.get(state.selectedStationId)?.city ?? "Taipei";
-    try {
-      state.weatherUsage = await fetchJson(`/insights/weather_usage${qs({ city, hours: 24 })}`);
-    } catch {
-      state.weatherUsage = null;
-    }
-    try {
-      state.rainRisk = await fetchJson(`/insights/rain_risk_now${qs({ city, top_k: 5 })}`);
-    } catch {
-      state.rainRisk = null;
-    }
-    if (state.settings.app_view === "home" && state.lastStatusSnapshot) renderBriefing(state.lastStatusSnapshot, state, { onboarding });
-    if (!quiet) setStatusText("Weather insights updated");
-  }
+	  async function refreshWeatherInsights({ quiet = false } = {}) {
+	    const city = state.lastStatusSnapshot?.tdx?.bike_cities?.[0] ?? state.stationById.get(state.selectedStationId)?.city ?? "Taipei";
+	    try {
+	      state.weatherUsage = await fetchJson(`/insights/weather_usage${qs({ city, hours: 24 })}`);
+	    } catch {
+	      state.weatherUsage = null;
+	    }
+	    try {
+	      // Fetch a larger list so Focus mode can show a meaningful Top N.
+	      state.rainRisk = await fetchJson(`/insights/rain_risk_now${qs({ city, top_k: 50 })}`);
+	    } catch {
+	      state.rainRisk = null;
+	    }
+	    if (state.settings.app_view === "home" && state.lastStatusSnapshot) renderBriefing(state.lastStatusSnapshot, state, { onboarding });
+	    if (!quiet) setStatusText("Weather insights updated");
+	  }
 
   async function applyRainMode({ source } = {}) {
     if (!state.settings.rain_mode) return;
@@ -3444,22 +3573,22 @@ export async function runExplorer() {
     stationSelect.appendChild(opt);
   }
 
-  for (const s of state.stations) {
-    const marker = L.circleMarker([s.lat, s.lon], {
-      radius: 6,
-      color: clusterColor(s.cluster),
-      fillColor: clusterColor(s.cluster),
-      fillOpacity: 0.9,
-      weight: 2,
-      station_id: s.id,
-    });
-    marker.bindTooltip(stationShortName(s.name), {
-      permanent: true,
-      direction: "center",
-      className: "station-label",
-      opacity: 1.0,
-      interactive: false,
-    });
+	  for (const s of state.stations) {
+	    const marker = L.circleMarker([s.lat, s.lon], {
+	      radius: 6,
+	      color: clusterColor(s.cluster),
+	      fillColor: clusterColor(s.cluster),
+	      fillOpacity: 0.9,
+	      weight: 2,
+	      station_id: s.id,
+	    });
+	    marker.bindTooltip(markerLabel({ station: s, value: state.labelByStation?.get?.(s.id), showValue: true }), {
+	      permanent: true,
+	      direction: "center",
+	      className: "station-label",
+	      opacity: 1.0,
+	      interactive: false,
+	    });
     marker.on("click", () => {
       selectStationById(s.id, { focus: true });
       refreshSelectedStation({ reason: "click" });
@@ -3518,12 +3647,14 @@ export async function runExplorer() {
   // --- Controls wiring ---
   const debouncedRefresh = debounce(() => refreshSelectedStation({ reason: "apply" }), 250);
 
-  stationSelect.addEventListener("change", () => {
-    const id = stationSelect.value;
-    if (!id) return;
-    selectStationById(id, { focus: true });
-    refreshSelectedStation({ reason: "select" });
-  });
+	  stationSelect.addEventListener("change", () => {
+	    const id = stationSelect.value;
+	    if (!id) return;
+	    selectStationById(id, { focus: true });
+	    const s = state.stationById.get(id);
+	    if (s) pushAction({ level: "ok", title: "Station", message: `Selected ${s.name} · Loading charts…` });
+	    refreshSelectedStation({ reason: "select" });
+	  });
 
   function buildTimeseriesUrl(stationId) {
     const joinParams = {
@@ -3683,55 +3814,77 @@ export async function runExplorer() {
     setBufferCircle(state.stationById.get(state.selectedStationId));
   });
 
-  document.getElementById("toggleRainMode").addEventListener("change", async (e) => {
-    setSetting("rain_mode", Boolean(e.target.checked));
-    await applyRainMode({ source: "ui" });
-  });
+	  document.getElementById("toggleRainMode").addEventListener("change", async (e) => {
+	    setSetting("rain_mode", Boolean(e.target.checked));
+	    pushAction({
+	      level: state.settings.rain_mode ? "ok" : "warn",
+	      title: "Rain mode",
+	      message: state.settings.rain_mode
+	        ? "Enabled. If it’s raining now, the app will switch to a rain-relevant heat view."
+	        : "Disabled.",
+	    });
+	    await applyRainMode({ source: "ui" });
+	  });
 
-  document.getElementById("toggleHeat").addEventListener("change", async (e) => {
-    setSetting("show_bike_heat", Boolean(e.target.checked));
-    if (state.settings.show_bike_heat) {
-      await refreshHeatIndex();
-      await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
-    } else {
-      applyHeatToMarkers();
-    }
-  });
+	  document.getElementById("toggleHeat").addEventListener("change", async (e) => {
+	    setSetting("show_bike_heat", Boolean(e.target.checked));
+	    if (state.settings.show_bike_heat) {
+	      pushAction({ level: "ok", title: "Heat", message: "Enabled. Marker colors and labels follow the selected metric." });
+	      await refreshHeatIndex();
+	      await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
+	    } else {
+	      pushAction({ level: "warn", title: "Heat", message: "Disabled. Marker labels keep showing last known availability." });
+	      applyHeatToMarkers();
+	    }
+	  });
 
-  document.getElementById("heatMetricSelect").addEventListener("change", async (e) => {
-    setSetting("heat_metric", e.target.value);
-    if (state.settings.show_bike_heat) await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
-    else applyHeatToMarkers();
-  });
-  document.getElementById("heatAggSelect").addEventListener("change", async (e) => {
-    setSetting("heat_agg", e.target.value);
-    if (state.settings.show_bike_heat) await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
-    else applyHeatToMarkers();
-  });
+	  document.getElementById("heatMetricSelect").addEventListener("change", async (e) => {
+	    setSetting("heat_metric", e.target.value);
+	    pushAction({ level: "ok", title: "Heat metric", message: `Metric → ${state.settings.heat_metric}` });
+	    if (state.settings.show_bike_heat) await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
+	    else applyHeatToMarkers();
+	  });
+	  document.getElementById("heatAggSelect").addEventListener("change", async (e) => {
+	    setSetting("heat_agg", e.target.value);
+	    pushAction({ level: "ok", title: "Heat aggregation", message: `Agg → ${state.settings.heat_agg}` });
+	    if (state.settings.show_bike_heat) await refreshHeatAtIndex(document.getElementById("heatTimeRange").value);
+	    else applyHeatToMarkers();
+	  });
   document.getElementById("toggleHeatFollowLatest").addEventListener("change", (e) => {
     setSetting("heat_follow_latest", Boolean(e.target.checked));
   });
-  document.getElementById("toggleProblemStations").addEventListener("change", (e) => {
-    setSetting("problem_focus", Boolean(e.target.checked));
-    if (Boolean(e.target.checked) && !state.settings.show_bike_heat) {
-      // Focus needs station-wide values; enable heat automatically.
-      const mode = String(state.settings.problem_mode || "shortage");
-      if (mode === "pressure") setSetting("heat_metric", "rent_proxy");
-      if (mode === "shortage") setSetting("heat_metric", "available");
-      setSetting("show_bike_heat", true);
-      refreshHeatIndex()
-        .then(() => refreshHeatAtIndex(document.getElementById("heatTimeRange").value))
-        .catch(() => applyHeatToMarkers());
-      return;
-    }
-    applyHeatToMarkers();
-  });
-  document.getElementById("problemModeSelect").addEventListener("change", async (e) => {
-    setSetting("problem_mode", e.target.value);
-    if (state.settings.problem_focus) {
-      if (state.settings.problem_mode === "pressure") setSetting("heat_metric", "rent_proxy");
-      if (state.settings.problem_mode === "shortage") setSetting("heat_metric", "available");
-    }
+	  document.getElementById("toggleProblemStations").addEventListener("change", (e) => {
+	    setSetting("problem_focus", Boolean(e.target.checked));
+	    if (Boolean(e.target.checked) && !state.settings.show_bike_heat) {
+	      // Focus needs station-wide values; enable heat automatically.
+	      const mode = String(state.settings.problem_mode || "shortage");
+	      if (mode === "pressure") setSetting("heat_metric", "rent_proxy");
+	      if (mode === "shortage") setSetting("heat_metric", "available");
+	      setSetting("show_bike_heat", true);
+	      pushAction({
+	        level: "ok",
+	        title: "Focus mode",
+	        message: "Enabled. Heat was turned on automatically so Top-N stations can be highlighted.",
+	      });
+	      refreshHeatIndex()
+	        .then(() => refreshHeatAtIndex(document.getElementById("heatTimeRange").value))
+	        .catch(() => applyHeatToMarkers());
+	      return;
+	    }
+	    pushAction({
+	      level: state.settings.problem_focus ? "ok" : "warn",
+	      title: "Focus mode",
+	      message: state.settings.problem_focus ? "Enabled. See the Top stations list." : "Disabled.",
+	    });
+	    applyHeatToMarkers();
+	  });
+	  document.getElementById("problemModeSelect").addEventListener("change", async (e) => {
+	    setSetting("problem_mode", e.target.value);
+	    pushAction({ level: "ok", title: "Focus mode", message: `Mode → ${state.settings.problem_mode}` });
+	    if (state.settings.problem_focus) {
+	      if (state.settings.problem_mode === "pressure") setSetting("heat_metric", "rent_proxy");
+	      if (state.settings.problem_mode === "shortage") setSetting("heat_metric", "available");
+	    }
     // If focus depends on a metric not currently loaded, prefetch it.
     try {
       const tsIdx = Number(document.getElementById("heatTimeRange")?.value ?? 0);
@@ -3748,10 +3901,11 @@ export async function runExplorer() {
     }
     applyHeatToMarkers();
   });
-  document.getElementById("problemTopN").addEventListener("change", (e) => {
-    setSetting("problem_top_n", Number(e.target.value) || 10);
-    applyHeatToMarkers();
-  });
+	  document.getElementById("problemTopN").addEventListener("change", (e) => {
+	    setSetting("problem_top_n", Number(e.target.value) || 10);
+	    pushAction({ level: "ok", title: "Focus mode", message: `Top N → ${state.settings.problem_top_n}` });
+	    applyHeatToMarkers();
+	  });
 
   document.getElementById("heatTimeRange").addEventListener(
     "input",

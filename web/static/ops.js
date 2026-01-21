@@ -44,7 +44,11 @@ async function adminFetchJson(url) {
         : typeof detail === "object" && detail
           ? detail.message || detail.code || JSON.stringify(detail)
           : `HTTP ${res.status}`;
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = res.status;
+    err.code = typeof detail === "object" && detail ? detail.code : null;
+    err.detail = detail;
+    throw err;
   }
   return payload;
 }
@@ -70,7 +74,11 @@ async function adminPostJson(url, body) {
         : typeof detail === "object" && detail
           ? detail.message || detail.code || JSON.stringify(detail)
           : `HTTP ${res.status}`;
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = res.status;
+    err.code = typeof detail === "object" && detail ? detail.code : null;
+    err.detail = detail;
+    throw err;
   }
   return payload;
 }
@@ -269,6 +277,37 @@ function externalCard(title, payload, { previewPath, downloadPath }) {
   return card;
 }
 
+function adminAccessCard(err) {
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Access",
+    title: "Admin endpoints are restricted",
+    badge: { tone: "warn", text: "forbidden" },
+    actions: [
+      { type: "link", label: "Open via 127.0.0.1", href: "http://127.0.0.1:8000/ops" },
+      {
+        label: "Copy help",
+        onClick: async () => {
+          const lines = [
+            "Admin endpoints are localhost-only by default.",
+            "Fix options:",
+            "1) Open the UI from the same machine: http://127.0.0.1:8000/ops",
+            "2) Or set METROBIKEATLAS_ADMIN_TOKEN and paste it in the token box on this page.",
+          ];
+          await MBA.copyText(lines.join("\n"));
+          MBA.setStatusText("Copied");
+        },
+      },
+    ],
+  });
+  const msg = err?.code === "admin_forbidden" ? "Need localhost or X-Admin-Token." : `Admin error: ${err?.message || "forbidden"}`;
+  body.innerHTML = `
+    <div style="font-weight:800;">${msg}</div>
+    <div class="hint">This page shows Jobs and External CSV previews only when admin access is allowed.</div>
+  `;
+  return card;
+}
+
 async function main() {
   MBA.setStatusText("Loading…");
   const root = document.getElementById("opsCards");
@@ -283,10 +322,12 @@ async function main() {
     MBA.setWeatherPill(meta);
 
     let jobs = [];
+    let adminErr = null;
     try {
       jobs = await adminFetchJson("/admin/jobs?limit=20");
-    } catch {
+    } catch (e) {
       jobs = [];
+      if (!adminErr && Number(e?.status) === 403) adminErr = e;
     }
 
     let metro = null;
@@ -294,18 +335,25 @@ async function main() {
     let weather = null;
     try {
       metro = await adminFetchJson("/external/metro_stations/preview?limit=1");
-    } catch {}
+    } catch (e) {
+      if (!adminErr && Number(e?.status) === 403) adminErr = e;
+    }
     try {
       cal = await adminFetchJson("/external/calendar/preview?limit=1");
-    } catch {}
+    } catch (e) {
+      if (!adminErr && Number(e?.status) === 403) adminErr = e;
+    }
     try {
       weather = await adminFetchJson("/external/weather_hourly/preview?limit=1");
-    } catch {}
+    } catch (e) {
+      if (!adminErr && Number(e?.status) === 403) adminErr = e;
+    }
 
     root.innerHTML = "";
     root.appendChild(credibilityCard(status, meta));
     root.appendChild(storyParagraphCard());
     root.appendChild(healthCard(status, meta));
+    if (adminErr) root.appendChild(adminAccessCard(adminErr));
 
     root.appendChild(
       quickFixCard({

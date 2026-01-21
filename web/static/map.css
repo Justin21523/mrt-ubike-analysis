@@ -140,7 +140,37 @@
   pointer-events: none;
 }
 
+.leaflet-tooltip.station-label .sl-name {
+  letter-spacing: 0.02em;
+}
+
+.leaflet-tooltip.station-label .sl-val {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.04);
+  font-weight: 900;
+}
+
+.leaflet-tooltip.station-label .sl-val.ok {
+  border-color: rgba(22, 163, 74, 0.30);
+  background: rgba(22, 163, 74, 0.10);
+  color: rgba(22, 163, 74, 0.95);
+}
+
+.leaflet-tooltip.station-label .sl-val.warn {
+  border-color: rgba(217, 119, 6, 0.30);
+  background: rgba(217, 119, 6, 0.10);
+  color: rgba(217, 119, 6, 0.95);
+}
+
+.leaflet-tooltip.station-label .sl-val.bad {
+  border-color: rgba(225, 29, 72, 0.35);
+  background: rgba(225, 29, 72, 0.10);
+  color: rgba(225, 29, 72, 0.95);
+}
+
 .leaflet-tooltip.station-label:before {
   display: none;
 }
-
