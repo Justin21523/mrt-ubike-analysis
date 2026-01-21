@@ -1839,7 +1839,7 @@ function renderBriefing(status, state, { onboarding } = {}) {
   }
 }
 
-async function main() {
+export async function runExplorer() {
   const cfg = await fetchJson("/config");
   setModePill(cfg);
   document.getElementById("appTitle").textContent = cfg.app_name;
@@ -3948,8 +3948,3 @@ async function main() {
     refreshSelectedStation({ reason: "auto" });
   }
 }
-
-main().catch((err) => {
-  console.error(err);
-  alert(`Failed to load app: ${err.message}`);
-});

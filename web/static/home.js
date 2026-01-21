@@ -1,4 +1,7 @@
-const MBA = window.MBA;
+import * as Core from "./lib/mba_core.js";
+import { createCard } from "./lib/mba_cards.js";
+
+const MBA = { ...Core, createCard };
 
 function loadDrafts() {
   try {
