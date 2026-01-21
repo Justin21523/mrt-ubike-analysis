@@ -119,6 +119,17 @@ def _stub_chartjs(route: Route) -> None:
     route.fulfill(status=200, content_type="application/javascript", body=js)
 
 
+_PNG_1X1_WHITE = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x82\x81\x8d\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _stub_osm_tiles(route: Route) -> None:
+    # Deterministic placeholder: avoids network dependency while still rendering a "map-like" base layer.
+    route.fulfill(status=200, content_type="image/png", body=_PNG_1X1_WHITE)
+
+
 def _iter_shots() -> Iterator[PageShot]:
     yield PageShot("home", "/home", "#homeCards")
     yield PageShot("insights", "/insights", "#insightsCards")
@@ -132,6 +143,13 @@ def main() -> int:
     ap.add_argument("--base-url", default="http://127.0.0.1:8000")
     ap.add_argument("--out-dir", default=str(_repo_root() / "docs" / "screenshots"))
     ap.add_argument("--start-api", action="store_true", help="Start API via scripts/run_api.py")
+    ap.add_argument(
+        "--pages",
+        default="home,insights,explorer,ops,about",
+        help="Comma-separated page names to capture (home,insights,explorer,ops,about)",
+    )
+    ap.add_argument("--stub-leaflet", action="store_true", help="Stub Leaflet assets (for offline/deterministic runs)")
+    ap.add_argument("--stub-chartjs", action="store_true", default=True, help="Stub Chart.js (deterministic)")
     ap.add_argument("--timeout-s", type=float, default=60.0)
     args = ap.parse_args()
 
@@ -149,12 +167,20 @@ def main() -> int:
             browser = p.chromium.launch(headless=True)
             ctx = browser.new_context(viewport={"width": 1440, "height": 900}, device_scale_factor=1)
 
-            # Make the run deterministic: do not depend on CDN availability.
-            ctx.route("https://unpkg.com/leaflet@*/dist/leaflet.css", _stub_leaflet)
-            ctx.route("https://unpkg.com/leaflet@*/dist/leaflet.js", _stub_leaflet)
-            ctx.route("https://cdn.jsdelivr.net/npm/chart.js@*/dist/chart.umd.min.js", _stub_chartjs)
+            # Make the run deterministic: avoid network dependency where possible.
+            if args.stub_leaflet:
+                ctx.route("https://unpkg.com/leaflet@*/dist/leaflet.css", _stub_leaflet)
+                ctx.route("https://unpkg.com/leaflet@*/dist/leaflet.js", _stub_leaflet)
+            if args.stub_chartjs:
+                ctx.route("https://cdn.jsdelivr.net/npm/chart.js@*/dist/chart.umd.min.js", _stub_chartjs)
+            # Tile servers are frequently rate-limited; stub to a placeholder tile.
+            ctx.route("https://*.tile.openstreetmap.org/*", _stub_osm_tiles)
+            ctx.route("https://tile.openstreetmap.org/*", _stub_osm_tiles)
 
+            wanted = {x.strip() for x in str(args.pages).split(",") if x.strip()}
             for shot in _iter_shots():
+                if wanted and shot.name not in wanted:
+                    continue
                 page = ctx.new_page()
                 page.goto(f"{args.base_url}{shot.path}", wait_until="domcontentloaded", timeout=int(args.timeout_s * 1000))
                 page.wait_for_selector(shot.wait_for, timeout=int(args.timeout_s * 1000))
@@ -174,4 +200,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

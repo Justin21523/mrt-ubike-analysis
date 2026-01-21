@@ -6,6 +6,12 @@
 .map {
   height: 100%;
   width: 100%;
+  /* Fallback background so the map area is visually clear even if tiles are blocked/rate-limited. */
+  background-color: #eef2f7;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 
 .scene-hud {
