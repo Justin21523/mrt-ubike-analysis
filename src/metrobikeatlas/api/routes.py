@@ -1674,6 +1674,8 @@ def hotspots(
     agg: str = "sum",
     ts: str | None = None,
     top_k: int = 5,
+    scenario_weather: str = "auto",
+    scenario_calendar: str = "auto",
     service: StationService = Depends(get_service),
 ) -> HotspotsOut:
     # Public endpoint (safe): it only returns station ids/names and derived values.
@@ -1682,10 +1684,73 @@ def hotspots(
 
     # Choose timestamp
     if ts is None:
-        idx = service.metro_heat_index(limit=1)
-        if not idx or idx[-1].get("ts") is None:
+        idx = service.metro_heat_index(limit=500)
+        if not idx:
             raise HTTPException(status_code=503, detail="Heat index unavailable")
-        target_dt = idx[-1]["ts"]
+        import pandas as pd
+
+        df = pd.DataFrame(idx)
+        if "ts" not in df.columns:
+            raise HTTPException(status_code=503, detail="Heat index unavailable")
+        df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+        df = df.dropna(subset=["ts"]).sort_values("ts")
+        if df.empty:
+            raise HTTPException(status_code=503, detail="Heat index unavailable")
+
+        repo_root = _resolve_repo_root()
+
+        def _apply_weather_filter(frame: pd.DataFrame) -> pd.DataFrame:
+            mode = str(scenario_weather or "auto").strip().lower()
+            if mode not in {"rainy", "clear"}:
+                return frame
+            path = repo_root / "data" / "external" / "weather_hourly.csv"
+            if not path.exists():
+                return frame.iloc[0:0]
+            w = pd.read_csv(path)
+            if "ts" not in w.columns or "precip_mm" not in w.columns:
+                return frame.iloc[0:0]
+            w["ts"] = pd.to_datetime(w["ts"], utc=True, errors="coerce")
+            w = w.dropna(subset=["ts"]).copy()
+            w["ts_hour"] = w["ts"].dt.floor("h")
+            w["precip_mm"] = pd.to_numeric(w["precip_mm"], errors="coerce").fillna(0.0)
+            tmp = frame.copy()
+            tmp["ts_hour"] = tmp["ts"].dt.floor("h")
+            tmp = tmp.merge(w[["ts_hour", "precip_mm"]], how="left", on="ts_hour")
+            tmp["precip_mm"] = tmp["precip_mm"].fillna(0.0)
+            if mode == "rainy":
+                return tmp[tmp["precip_mm"] > 0.0]
+            return tmp[tmp["precip_mm"] <= 0.0]
+
+        def _apply_calendar_filter(frame: pd.DataFrame) -> pd.DataFrame:
+            mode = str(scenario_calendar or "auto").strip().lower()
+            if mode not in {"holiday", "weekday"}:
+                return frame
+            path = repo_root / "data" / "external" / "calendar.csv"
+            if not path.exists():
+                return frame.iloc[0:0]
+            cal = pd.read_csv(path)
+            if "date" not in cal.columns or "is_holiday" not in cal.columns:
+                return frame.iloc[0:0]
+            cal["date"] = cal["date"].astype(str)
+            cal["is_holiday"] = pd.to_numeric(cal["is_holiday"], errors="coerce").fillna(0).astype(int)
+            tmp = frame.copy()
+            tmp["local_date"] = tmp["ts"].dt.tz_convert("Asia/Taipei").dt.date.astype(str)
+            tmp = tmp.merge(cal[["date", "is_holiday"]], how="left", left_on="local_date", right_on="date")
+            tmp["is_holiday"] = tmp["is_holiday"].fillna(0).astype(int)
+            if mode == "holiday":
+                return tmp[tmp["is_holiday"] == 1]
+            return tmp[tmp["is_holiday"] == 0]
+
+        chosen = df
+        chosen = _apply_weather_filter(chosen)
+        chosen = _apply_calendar_filter(chosen)
+
+        used_fallback = False
+        if chosen.empty:
+            chosen = df
+            used_fallback = True
+
+        target_dt = chosen.iloc[-1]["ts"].to_pydatetime()
         ts = target_dt.isoformat()
     try:
         rows = service.metro_heat_at(ts, metric=metric, agg=agg)
@@ -1711,8 +1776,6 @@ def hotspots(
     vals.sort(key=lambda x: x[1], reverse=True)
     hot = vals[:top]
     cold = list(reversed(vals[-top:])) if len(vals) >= top else list(reversed(vals))
-
-    import pandas as pd
 
     target_ts = pd.to_datetime(ts, utc=True, errors="coerce")
     if pd.isna(target_ts):
@@ -1750,8 +1813,18 @@ def hotspots(
         for i, (sid, v) in enumerate(cold)
     ]
 
+    scen_w = str(scenario_weather or "auto").strip().lower()
+    scen_c = str(scenario_calendar or "auto").strip().lower()
+    scen_parts = []
+    if scen_w in {"rainy", "clear"}:
+        scen_parts.append(f"weather={scen_w}")
+    if scen_c in {"holiday", "weekday"}:
+        scen_parts.append(f"calendar={scen_c}")
+    scen_txt = f" scenario({', '.join(scen_parts)})" if scen_parts else ""
+    fb_txt = " (scenario not available; fell back to latest ts)" if ts is not None and "used_fallback" in locals() and used_fallback else ""
     explanation = (
-        "Hotspots/coldspots are derived by ranking metro stations using the selected heat metric at a single timestamp. "
+        "Hotspots/coldspots are derived by ranking metro stations using the selected heat metric at a single timestamp."
+        f"{scen_txt}{fb_txt} "
         "Use this list for narrative exploration; validate with longer windows before policy decisions."
     )
     return HotspotsOut(metric=str(metric), agg=str(agg), ts=target_py, hot=hot_out, cold=cold_out, explanation=explanation)

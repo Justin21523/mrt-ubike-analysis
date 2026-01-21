@@ -1875,6 +1875,9 @@ async function main() {
   // Apply permalink hash overrides (if present).
   const hash = parseHashParams();
   const initialStationId = hash.station_id ? String(hash.station_id) : null;
+  const guided = String(hash.guided || "") === "1";
+  const guidedKind = hash.guided_kind ? String(hash.guided_kind) : null;
+  const guidedTitle = hash.guided_title ? String(hash.guided_title) : null;
   const patch = {};
   for (const key of [
     "join_method",
@@ -3443,6 +3446,27 @@ async function main() {
   if (initialStationId && state.stationById.has(initialStationId)) {
     selectStationById(initialStationId, { focus: false });
     refreshSelectedStation({ reason: "permalink" });
+  }
+
+  // Guided mode: when opened from a policy card, surface a short instruction.
+  if (guided) {
+    const parts = [];
+    if (guidedTitle) parts.push(guidedTitle);
+    if (guidedKind) parts.push(`mode=${guidedKind}`);
+    if (state.settings.show_bike_heat) parts.push(`heat=${state.settings.heat_metric}/${state.settings.heat_agg}`);
+    if (initialStationId) parts.push(`station=${initialStationId}`);
+    pushAction({
+      level: "ok",
+      title: "Guided mode",
+      message:
+        (parts.length ? parts.join(" · ") : "Opened from a policy card.") +
+        " · Next: check the Charts panel and the station evidence.",
+    });
+    // Ensure the right panel is visible for evidence.
+    if (state.settings.right_collapsed) {
+      setSetting("right_collapsed", false);
+      updatePanelsCollapsed();
+    }
   }
 
   // Heat layer initialization (after markers exist).

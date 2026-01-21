@@ -263,7 +263,9 @@ async function main() {
       valueLabel = "mean_available";
       explorerDefaults = { show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" };
     } else if (state.mode === "pressure") {
-      payload = await MBA.fetchJson(`/insights/hotspots?metric=rent_proxy&agg=sum&top_k=${topK}`);
+      payload = await MBA.fetchJson(
+        `/insights/hotspots?metric=rent_proxy&agg=sum&top_k=${topK}&scenario_weather=${encodeURIComponent(state.scenarioWeather)}&scenario_calendar=${encodeURIComponent(state.scenarioCalendar)}`
+      );
       items = payload?.hot ?? [];
       title = "Pressure (high rent_proxy)";
       badgeText = "rent_proxy";
@@ -271,7 +273,9 @@ async function main() {
       valueLabel = "rent_proxy";
       explorerDefaults = { show_bike_heat: 1, heat_metric: "rent_proxy", heat_agg: "sum" };
     } else if (state.mode === "hotspots") {
-      payload = await MBA.fetchJson(`/insights/hotspots?metric=available&agg=sum&top_k=${topK}`);
+      payload = await MBA.fetchJson(
+        `/insights/hotspots?metric=available&agg=sum&top_k=${topK}&scenario_weather=${encodeURIComponent(state.scenarioWeather)}&scenario_calendar=${encodeURIComponent(state.scenarioCalendar)}`
+      );
       items = payload?.hot ?? [];
       title = "Hotspots (high available)";
       badgeText = "available";
@@ -279,7 +283,9 @@ async function main() {
       valueLabel = "available";
       explorerDefaults = { show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" };
     } else if (state.mode === "coldspots" || state.mode === "shortage") {
-      payload = await MBA.fetchJson(`/insights/hotspots?metric=available&agg=sum&top_k=${topK}`);
+      payload = await MBA.fetchJson(
+        `/insights/hotspots?metric=available&agg=sum&top_k=${topK}&scenario_weather=${encodeURIComponent(state.scenarioWeather)}&scenario_calendar=${encodeURIComponent(state.scenarioCalendar)}`
+      );
       items = payload?.cold ?? [];
       title = state.mode === "shortage" ? "Shortage (low availability)" : "Coldspots (low available)";
       badgeText = "available";
@@ -323,4 +329,3 @@ main().catch((e) => {
   console.error(e);
   MBA.setStatusText(`Error: ${e.message}`);
 });
-

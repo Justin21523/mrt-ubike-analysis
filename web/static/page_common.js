@@ -156,3 +156,69 @@ window.MBA = {
   createCard,
 };
 
+function getAdminToken() {
+  try {
+    return localStorage.getItem("metrobikeatlas.admin_token") || "";
+  } catch {
+    return "";
+  }
+}
+
+async function adminFetch(url, options = {}) {
+  const token = getAdminToken();
+  const headers = new Headers(options.headers || {});
+  if (token) headers.set("X-Admin-Token", token);
+  return await fetch(url, { ...options, headers });
+}
+
+async function adminFetchJson(url) {
+  const res = await adminFetch(url);
+  const text = await res.text().catch(() => "");
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { detail: text };
+  }
+  if (!res.ok) {
+    const detail = payload?.detail;
+    const msg =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" && detail
+          ? detail.message || detail.code || JSON.stringify(detail)
+          : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return payload;
+}
+
+async function adminPostJson(url, body) {
+  const res = await adminFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body == null ? "{}" : JSON.stringify(body),
+  });
+  const text = await res.text().catch(() => "");
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { detail: text };
+  }
+  if (!res.ok) {
+    const detail = payload?.detail;
+    const msg =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" && detail
+          ? detail.message || detail.code || JSON.stringify(detail)
+          : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return payload;
+}
+
+window.MBA.getAdminToken = getAdminToken;
+window.MBA.adminFetchJson = adminFetchJson;
+window.MBA.adminPostJson = adminPostJson;
