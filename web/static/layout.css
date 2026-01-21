@@ -1,0 +1,134 @@
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 14px 12px;
+}
+
+.toolbar {
+  height: var(--toolbar-h);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.7));
+  backdrop-filter: blur(10px);
+}
+
+.toolbar-left,
+.toolbar-center,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.brand-subtitle {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.kbd-hint {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: var(--left-size) var(--splitter) 1fr var(--splitter) var(--right-size);
+  height: calc(100vh - var(--toolbar-h) - var(--status-h));
+  min-height: 0;
+}
+
+.sidebar,
+.scene {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  min-height: 0;
+}
+
+.sidebar {
+  overflow: hidden;
+}
+
+.sidebar-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+}
+
+.sidebar-scroll > * {
+  max-width: 560px;
+}
+
+.splitter {
+  background: rgba(15, 23, 42, 0.03);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: col-resize;
+}
+
+.left-collapsed .sidebar.left,
+.left-collapsed #splitterLeft {
+  display: none;
+}
+
+.left-collapsed {
+  --left-size: 0px;
+}
+
+.right-collapsed .sidebar.right,
+.right-collapsed #splitterRight {
+  display: none;
+}
+
+.right-collapsed {
+  --right-size: 0px;
+}
+
+.statusbar {
+  height: var(--status-h);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+}
+
+.status-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - var(--toolbar-h) - var(--status-h));
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .sidebar.left,
+  .sidebar.right {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}
+

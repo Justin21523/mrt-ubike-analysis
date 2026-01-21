@@ -1,0 +1,155 @@
+.cards {
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.card.primary {
+  border-color: rgba(37, 99, 235, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 251, 0.70));
+}
+
+.card.meta {
+  background: rgba(15, 23, 42, 0.015);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 10px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+}
+
+.card-head-left {
+  min-width: 0;
+}
+
+.card-kicker {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card-title {
+  margin-top: 4px;
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.card-head-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.card-right {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.card-body {
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.card-actions {
+  padding: 0 12px 12px 12px;
+  margin: 0;
+}
+
+.health-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+@media (max-width: 1200px) {
+  .health-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .health-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.health-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.health-title {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.health-value {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.health-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.briefing-callout {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.briefing-callout.info {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.briefing-callout.warning,
+.briefing-callout.warn {
+  border-color: rgba(217, 119, 6, 0.25);
+  background: rgba(217, 119, 6, 0.06);
+}
+
+.briefing-callout.critical,
+.briefing-callout.bad {
+  border-color: rgba(225, 29, 72, 0.25);
+  background: rgba(225, 29, 72, 0.06);
+}
+
+.briefing-callout-title {
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.briefing-callout-body {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+

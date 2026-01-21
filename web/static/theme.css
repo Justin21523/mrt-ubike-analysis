@@ -1,0 +1,78 @@
+:root {
+  /* Design tokens (light, public policy briefing feel) */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Slate (text/dividers) */
+  --slate-950: #0f172a;
+  --slate-700: #334155;
+  --slate-600: #475569;
+  --slate-500: #64748b;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50: #f8fafc;
+
+  /* Accent + support */
+  --accent-600: #2563eb; /* public service blue */
+  --teal-600: #0d9488; /* environment/weather */
+  --amber-600: #d97706; /* warning */
+  --rose-600: #e11d48; /* critical */
+
+  /* Semantic */
+  --semantic-ok: #16a34a;
+  --semantic-warn: var(--amber-600);
+  --semantic-bad: var(--rose-600);
+  --semantic-info: var(--accent-600);
+
+  /* Surfaces */
+  --bg: #f6f8fc;
+  --surface: #ffffff;
+  --surface-2: #f1f5fb;
+  --text: var(--slate-950);
+  --muted: var(--slate-600);
+  --border: rgba(15, 23, 42, 0.12);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 18px 55px rgba(15, 23, 42, 0.16);
+
+  /* App sizes */
+  --toolbar-h: 56px;
+  --status-h: 34px;
+  --left-size: 340px;
+  --right-size: 440px;
+  --splitter: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.hidden {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+@media (max-width: 1100px) {
+  :root {
+    --left-size: 300px;
+    --right-size: 380px;
+  }
+}
+
