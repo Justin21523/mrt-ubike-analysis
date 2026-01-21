@@ -3285,9 +3285,9 @@ export async function runExplorer() {
   setStatusPolling(30000);
   startEventStream();
 
-	  function applySettingsToControls() {
-    document.getElementById("joinMethodSelect").value = state.settings.join_method;
-    document.getElementById("granularitySelect").value = state.settings.granularity;
+		  function applySettingsToControls() {
+	    document.getElementById("joinMethodSelect").value = state.settings.join_method;
+	    document.getElementById("granularitySelect").value = state.settings.granularity;
 
     document.getElementById("radiusInput").value = String(state.settings.radius_m);
     document.getElementById("radiusNumber").value = String(state.settings.radius_m);
@@ -3296,12 +3296,15 @@ export async function runExplorer() {
     document.getElementById("windowDaysInput").value = String(state.settings.window_days);
     document.getElementById("windowDaysNumber").value = String(state.settings.window_days);
 
-    document.getElementById("metroMetricSelect").value = state.settings.metro_metric;
-    document.getElementById("bikeMetricSelect").value = state.settings.bike_metric;
+	    document.getElementById("metroMetricSelect").value = state.settings.metro_metric;
+	    document.getElementById("bikeMetricSelect").value = state.settings.bike_metric;
 
-    document.getElementById("similarTopK").value = String(state.settings.similar_top_k);
-    document.getElementById("similarMetricSelect").value = state.settings.similar_metric;
-    document.getElementById("similarStandardize").checked = Boolean(state.settings.similar_standardize);
+	    const similarTopK = document.getElementById("similarTopK");
+	    const similarMetric = document.getElementById("similarMetricSelect");
+	    const similarStd = document.getElementById("similarStandardize");
+	    if (similarTopK) similarTopK.value = String(state.settings.similar_top_k);
+	    if (similarMetric) similarMetric.value = state.settings.similar_metric;
+	    if (similarStd) similarStd.checked = Boolean(state.settings.similar_standardize);
 
     document.getElementById("toggleNearbyBikes").checked = Boolean(state.settings.show_nearby_bikes);
     document.getElementById("toggleHeat").checked = Boolean(state.settings.show_bike_heat);
@@ -3791,18 +3794,18 @@ export async function runExplorer() {
     refreshChartsFromCache();
   });
 
-  document.getElementById("similarTopK").addEventListener("change", (e) => {
-    setSetting("similar_top_k", Number(e.target.value) || cfg.analytics.similarity.top_k);
-    debouncedRefresh();
-  });
-  document.getElementById("similarMetricSelect").addEventListener("change", (e) => {
-    setSetting("similar_metric", e.target.value);
-    debouncedRefresh();
-  });
-  document.getElementById("similarStandardize").addEventListener("change", (e) => {
-    setSetting("similar_standardize", Boolean(e.target.checked));
-    debouncedRefresh();
-  });
+	  document.getElementById("similarTopK")?.addEventListener("change", (e) => {
+	    setSetting("similar_top_k", Number(e.target.value) || cfg.analytics.similarity.top_k);
+	    debouncedRefresh();
+	  });
+	  document.getElementById("similarMetricSelect")?.addEventListener("change", (e) => {
+	    setSetting("similar_metric", e.target.value);
+	    debouncedRefresh();
+	  });
+	  document.getElementById("similarStandardize")?.addEventListener("change", (e) => {
+	    setSetting("similar_standardize", Boolean(e.target.checked));
+	    debouncedRefresh();
+	  });
 
   function bindToggle(id, key, after) {
     const el = document.getElementById(id);
