@@ -240,6 +240,165 @@ function buildMethodsCard() {
   return card;
 }
 
+function buildPolicyOptionCard({ title, kicker = "Policy option", badge, impact, beneficiaries, risk, needs, actions, payload }) {
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker,
+    title,
+    badge: badge || { tone: "ok", text: "policy" },
+    actions: [
+      ...(actions || []),
+      {
+        label: "Copy",
+        onClick: async () => {
+          const lines = [];
+          lines.push(title);
+          if (impact) lines.push(`Impact: ${impact}`);
+          if (beneficiaries) lines.push(`Beneficiaries: ${beneficiaries}`);
+          if (risk) lines.push(`Risk: ${risk}`);
+          if (needs) lines.push(`Needs: ${needs}`);
+          await MBA.copyText(lines.join("\n"));
+          MBA.setStatusText("Copied");
+        },
+      },
+      {
+        label: "Download JSON",
+        onClick: () => MBA.downloadJson(`metrobikeatlas-policy-${new Date().toISOString()}.json`, payload || {}),
+      },
+    ],
+  });
+
+  body.innerHTML = `
+    <div><span class="mono">Impact</span> · ${impact || "—"}</div>
+    <div><span class="mono">Beneficiaries</span> · ${beneficiaries || "—"}</div>
+    <div><span class="mono">Risk</span> · ${risk || "—"}</div>
+    <div><span class="mono">Needs</span> · ${needs || "—"}</div>
+  `;
+  return card;
+}
+
+function buildPolicyOptionsSection({ status, meta, hotspotsAvail, hotspotsRent, rainRisk }) {
+  const h = status?.health ?? {};
+  const w = meta?.meta?.external?.weather_collector ?? null;
+  const demo = Boolean(status?.demo_mode);
+  const cards = [];
+
+  // 1) Data source / pipeline reliability
+  if (!demo && Number(h.metro_tdx_404_count || 0) > 0) {
+    cards.push(
+      buildPolicyOptionCard({
+        title: "Fix data source: Metro stations unavailable (TDX 404)",
+        badge: { tone: "bad", text: "critical" },
+        impact: "Restores station layer/links so insights remain trustworthy.",
+        beneficiaries: "Decision makers, operators, analysts",
+        risk: "Using fallback may differ from official station definitions.",
+        needs: "Provide external metro stations CSV or adjust TDX config/path.",
+        actions: [
+          { type: "link", label: "Open Ops (fix)", href: "/ops", primary: true },
+          { type: "link", label: "Open About", href: "/about" },
+        ],
+        payload: { kind: "metro_404", status, meta },
+      })
+    );
+  }
+
+  // 2) Shortage: low availability (use coldspots from available)
+  const shortage = (hotspotsAvail?.cold ?? []).slice(0, 3);
+  if (shortage.length) {
+    const top = shortage[0];
+    cards.push(
+      buildPolicyOptionCard({
+        title: "Increase supply at shortage hotspots (low availability)",
+        badge: { tone: "warn", text: "shortage" },
+        impact: "Reduce 'no-bike' incidents and improve last-mile transfer reliability.",
+        beneficiaries: "Commuters, transfer passengers",
+        risk: "If shortage is only peak-hour, fixed expansion may be underutilized off-peak.",
+        needs: "1–2 weeks of data to verify peak patterns; confirm with operator logs.",
+        actions: [
+          {
+            type: "link",
+            label: "Open Explorer (focus)",
+            href: MBA.explorerHref({
+              station_id: top.station_id,
+              show_bike_heat: 1,
+              heat_metric: "available",
+              heat_agg: "sum",
+            }),
+            primary: true,
+          },
+          { type: "link", label: "Open Insights", href: "/insights" },
+        ],
+        payload: { kind: "shortage", top, list: shortage, hotspotsAvail },
+      })
+    );
+  }
+
+  // 3) Pressure: high rent_proxy (use hotspots from rent_proxy)
+  const pressure = (hotspotsRent?.hot ?? []).slice(0, 3);
+  if (pressure.length) {
+    const top = pressure[0];
+    cards.push(
+      buildPolicyOptionCard({
+        title: "Rebalancing strategy for high demand pressure (rent_proxy)",
+        badge: { tone: "warn", text: "pressure" },
+        impact: "Mitigates peak-hour demand spikes by targeted rebalancing and guidance.",
+        beneficiaries: "High-frequency users, operators",
+        risk: "Proxy demand may over/under-estimate true demand in certain areas.",
+        needs: "Validate proxy against ridership/operational data; define time-of-day strategy.",
+        actions: [
+          {
+            type: "link",
+            label: "Open Explorer (rent heat)",
+            href: MBA.explorerHref({
+              station_id: top.station_id,
+              show_bike_heat: 1,
+              heat_metric: "rent_proxy",
+              heat_agg: "sum",
+            }),
+            primary: true,
+          },
+          { type: "link", label: "Open Ops", href: "/ops" },
+        ],
+        payload: { kind: "pressure", top, list: pressure, hotspotsRent },
+      })
+    );
+  }
+
+  // 4) Rain contingency
+  const rainingNow = Boolean(w?.is_rainy_now);
+  const riskItems = (rainRisk?.items ?? []).slice(0, 3);
+  if (rainingNow && riskItems.length) {
+    const top = riskItems[0];
+    cards.push(
+      buildPolicyOptionCard({
+        title: "Rain-day contingency: pre-position supply near risk stations",
+        badge: { tone: "warn", text: "rain" },
+        impact: "Improves service resilience during rain; reduces sudden shortages.",
+        beneficiaries: "Commuters, vulnerable users during bad weather",
+        risk: "Weather is city-level estimate; microclimates may differ by district.",
+        needs: "Define rain threshold and lead time; consider communication/signage strategy.",
+        actions: [
+          {
+            type: "link",
+            label: "Open Explorer (risk station)",
+            href: MBA.explorerHref({
+              station_id: top.station_id,
+              show_bike_heat: 1,
+              heat_metric: "available",
+              heat_agg: "sum",
+            }),
+            primary: true,
+          },
+          { type: "link", label: "Open Insights", href: "/insights" },
+        ],
+        payload: { kind: "rain_contingency", top, list: riskItems, rainRisk },
+      })
+    );
+  }
+
+  return cards.slice(0, 4);
+}
+
 async function main() {
   MBA.setStatusText("Loading…");
   const root = document.getElementById("homeCards");
@@ -250,9 +409,11 @@ async function main() {
   MBA.setWeatherPill(meta);
 
   const city = status?.tdx?.bike_cities?.[0] ?? "Taipei";
-  const [usage, risk] = await Promise.all([
+  const [usage, risk, hotspotsAvail, hotspotsRent] = await Promise.all([
     MBA.fetchJson(`/insights/weather_usage?city=${encodeURIComponent(city)}&hours=24`).catch(() => null),
     MBA.fetchJson(`/insights/rain_risk_now?city=${encodeURIComponent(city)}&top_k=5`).catch(() => null),
+    MBA.fetchJson(`/insights/hotspots?metric=available&agg=sum&top_k=5`).catch(() => null),
+    MBA.fetchJson(`/insights/hotspots?metric=rent_proxy&agg=sum&top_k=5`).catch(() => null),
   ]);
 
   root.innerHTML = "";
@@ -262,6 +423,10 @@ async function main() {
   root.appendChild(buildStoryParagraphCard());
   root.appendChild(buildStoryProblemCard({ status, meta, usage }));
   root.appendChild(buildStoryRiskCard({ status, meta, risk }));
+  // Policy options (2–4 cards)
+  for (const c of buildPolicyOptionsSection({ status, meta, hotspotsAvail, hotspotsRent, rainRisk: risk })) {
+    root.appendChild(c);
+  }
   root.appendChild(buildNextActionsCard(status, meta));
   root.appendChild(buildMethodsCard());
 
