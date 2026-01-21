@@ -25,9 +25,6 @@
           <div class="brand-title" id="appTitle">MetroBikeAtlas</div>
           <div class="brand-subtitle" id="appSubtitle">MRT × Shared Bike × City Factors</div>
         </div>
-        <div class="pill" id="modePill">Loading…</div>
-        <div class="pill" id="ssePill">Live: connecting…</div>
-        <div class="pill" id="weatherPill">Weather: —</div>
       </div>
       <div class="toolbar-center">
         <div class="nav" role="tablist" aria-label="Pages">
@@ -44,7 +41,12 @@
         <button class="btn btn-primary" id="btnHelp" title="Keyboard shortcuts (?)">Help</button>
       </div>
       <div class="toolbar-right">
-        <div class="kbd-hint">Ctrl+K: search • WASD: pan • Q/E: zoom</div>
+        <a class="header-link" href="/home#data">View details →</a>
+        <div class="header-badges" aria-label="Status badges">
+          <span class="badge" id="hdrMode">—</span>
+          <span class="badge" id="hdrAge">—</span>
+          <span class="badge" id="hdrBuild">—</span>
+        </div>
       </div>
     </header>
 
@@ -322,36 +324,13 @@
             <ul id="correlationList" class="list"></ul>
           </details>
 
-          <details class="details" id="detailsDataStatus">
-            <summary class="summary">Data Status</summary>
+          <details class="details">
+            <summary class="summary">Operations</summary>
+            <div class="hint">Admin actions / jobs / external inputs are intentionally kept on the Ops page.</div>
             <div class="row row-actions">
-              <button class="btn btn-primary" id="btnRefreshStatus">Refresh</button>
-              <button class="btn" id="btnStartCollector">Start collector</button>
-              <button class="btn" id="btnStopCollector">Stop collector</button>
-              <button class="btn" id="btnBuildSilver">Build Silver (async)</button>
-              <button class="btn" id="btnRefreshWeather">Refresh weather</button>
-              <span class="hint mono" id="statusUpdatedAt"></span>
+              <a class="btn btn-primary" href="/ops">Open Ops</a>
+              <a class="btn" href="/home#data">Data details</a>
             </div>
-
-            <div class="row row-actions">
-              <input class="input" id="adminTokenInput" type="password" placeholder="Admin token (optional)" />
-              <button class="btn" id="btnSaveAdminToken">Save token</button>
-              <button class="btn" id="btnClearAdminToken">Clear</button>
-            </div>
-
-            <div class="health-cards" id="healthCards"></div>
-            <div class="status-block" id="alertsPanel"></div>
-
-            <div class="section-subtitle">Jobs</div>
-            <div class="status-block" id="jobCenter"></div>
-
-            <div class="section-subtitle">External inputs</div>
-            <div id="externalMetro" class="status-block"></div>
-            <div id="externalCalendar" class="status-block" style="margin-top:10px;"></div>
-            <div id="externalWeather" class="status-block" style="margin-top:10px;"></div>
-
-            <div class="section-subtitle">Admin result</div>
-            <div id="adminResult" class="status-block"></div>
           </details>
         </div>
       </aside>

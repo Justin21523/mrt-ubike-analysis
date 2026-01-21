@@ -79,7 +79,7 @@ def main() -> int:
             path=web / "about.html",
             required_ids=("statusText",),
             required_css=css,
-            required_scripts=(),
+            required_scripts=("/static/about.js",),
         ),
         PageSpec(
             path=web / "explorer.html",

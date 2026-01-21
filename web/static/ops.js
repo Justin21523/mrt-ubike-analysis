@@ -93,52 +93,15 @@ function setOverlayVisible(visible, text) {
   el.hidden = !visible;
 }
 
-function storyParagraphCard() {
+function dataDetailsCard() {
   const { card, body } = MBA.createCard({
-    tone: "meta",
-    kicker: "Ops Flow",
-    title: "Problem → Evidence → Implication → Action",
-    badge: { tone: "muted", text: "guide" },
+    tone: "support",
+    kicker: "Data",
+    title: "Credibility / versions / sources",
+    badge: { tone: "muted", text: "details" },
+    actions: [{ type: "link", label: "View details →", href: "/home#data", primary: true }],
   });
-  body.innerHTML = `
-    <div><span class="mono">Problem</span> · 資料不新鮮/缺檔/限流/卡住。</div>
-    <div><span class="mono">Evidence</span> · /status + jobs + external inputs。</div>
-    <div><span class="mono">Implication</span> · 影響前端敘事與洞察可信度。</div>
-    <div><span class="mono">Action</span> · Start/Build/Refresh，並保留 log 與版本。</div>
-  `;
-  return card;
-}
-
-function credibilityCard(status, meta) {
-  const resolved = meta?.meta ?? {};
-  const { card, body } = MBA.createCard({
-    tone: "meta",
-    kicker: "Data Credibility",
-    title: "Sources · freshness · traceability",
-    badge: { tone: status?.demo_mode ? "warn" : "ok", text: status?.demo_mode ? "demo" : "real" },
-    right: `<span class="mono">build ${MBA.shortId(resolved.silver_build_id)}</span>`,
-    actions: [
-      {
-        label: "Download JSON",
-        onClick: () => MBA.downloadJson(`metrobikeatlas-ops-meta-${new Date().toISOString()}.json`, { status, meta }),
-      },
-      {
-        label: "Copy summary",
-        onClick: async () => {
-          const h = status?.health ?? {};
-          const line = `collector=${h.collector_running ? "running" : "stopped"} bronze=${MBA.fmtAge(h.bronze_bike_availability_age_s)} silver=${MBA.fmtAge(
-            Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity))
-          )} build=${MBA.shortId(resolved.silver_build_id)} hash=${MBA.shortId(resolved.inputs_hash, 10)}`;
-          await MBA.copyText(line);
-          MBA.setStatusText("Copied");
-        },
-      },
-    ],
-  });
-  body.innerHTML = `<div class="hint">Silver: <span class="mono">${MBA.shortId(resolved.silver_build_id)}</span> · hash <span class="mono">${MBA.shortId(
-    resolved.inputs_hash,
-    10
-  )}</span> · source <span class="mono">${resolved.fallback_source || "—"}</span></div>`;
+  body.innerHTML = `<div class="hint">For briefing traceability (build id / inputs hash / sources), see the Data section on Home.</div>`;
   return card;
 }
 
@@ -318,8 +281,7 @@ async function main() {
   const refresh = async () => {
     MBA.setStatusText("Refreshing…");
     const [status, meta] = await Promise.all([MBA.fetchJson("/status"), MBA.fetchJson("/meta")]);
-    MBA.setModePill(Boolean(status?.demo_mode));
-    MBA.setWeatherPill(meta);
+    MBA.setHeaderBadges(status, meta);
 
     let jobs = [];
     let adminErr = null;
@@ -350,8 +312,7 @@ async function main() {
     }
 
     root.innerHTML = "";
-    root.appendChild(credibilityCard(status, meta));
-    root.appendChild(storyParagraphCard());
+    root.appendChild(dataDetailsCard());
     root.appendChild(healthCard(status, meta));
     if (adminErr) root.appendChild(adminAccessCard(adminErr));
 

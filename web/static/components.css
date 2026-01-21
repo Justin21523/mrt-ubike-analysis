@@ -220,6 +220,26 @@
   pointer-events: none;
 }
 
+.header-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.header-link {
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(15, 23, 42, 0.25);
+  padding-bottom: 1px;
+}
+
+.header-link:hover {
+  color: var(--text);
+  border-bottom-color: rgba(15, 23, 42, 0.45);
+}
+
 .action-toast {
   pointer-events: auto;
   border: 1px solid var(--border);
@@ -279,4 +299,3 @@
 .modal-body {
   padding: 12px;
 }
-

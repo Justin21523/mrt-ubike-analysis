@@ -36,6 +36,108 @@ function oneSentence(status, meta) {
   return parts.join(" · ");
 }
 
+function buildExecutiveBriefCard({ status, meta, scenario, learnedLines, primaryActionHref }) {
+  const w = meta?.meta?.external?.weather_collector ?? null;
+  const rainyNow = Boolean(w?.is_rainy_now);
+  const badge = { tone: rainyNow ? "warn" : "ok", text: rainyNow ? "rain now" : "clear now" };
+  const { card, body } = MBA.createCard({
+    tone: "primary",
+    kicker: "Executive brief",
+    title: "What’s happening today (1 sentence)",
+    badge,
+    actions: [
+      { type: "link", label: "Open Explorer", href: primaryActionHref, primary: true },
+      { type: "link", label: "See Insights", href: "/insights" },
+      { type: "link", label: "Ops", href: "/ops" },
+    ],
+  });
+  const line = oneSentence(status, meta);
+  const scenarioTxt = `Scenario: weather=${scenario.weather} · calendar=${scenario.calendar}`;
+  const learned =
+    Array.isArray(learnedLines) && learnedLines.length
+      ? `<ul style="margin:10px 0 0 18px;">${learnedLines.map((s) => `<li>${s}</li>`).join("")}</ul>`
+      : "";
+  body.innerHTML = `<div style="font-weight:900;">${line}</div><div class="hint mono" style="margin-top:8px;">${scenarioTxt}</div>${learned}`;
+  return card;
+}
+
+function buildScenarioCard({ scenario, onChange }) {
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Today’s scenario",
+    title: "Rain/clear · Weekday/holiday",
+    badge: { tone: "muted", text: "scenario" },
+  });
+  body.innerHTML = `
+    <div class="grid2">
+      <div class="field">
+        <label class="label" for="homeScenarioWeather">Weather</label>
+        <select id="homeScenarioWeather" class="select">
+          <option value="auto">auto (use now)</option>
+          <option value="rainy">rainy</option>
+          <option value="clear">clear</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="homeScenarioCalendar">Calendar</label>
+        <select id="homeScenarioCalendar" class="select">
+          <option value="auto">auto</option>
+          <option value="weekday">weekday</option>
+          <option value="holiday">holiday</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint">This drives the “learned” bullets and the Top stations shown below.</div>
+  `;
+  const wEl = body.querySelector("#homeScenarioWeather");
+  const cEl = body.querySelector("#homeScenarioCalendar");
+  wEl.value = scenario.weather;
+  cEl.value = scenario.calendar;
+  const fire = () => {
+    scenario.weather = String(wEl.value || "auto");
+    scenario.calendar = String(cEl.value || "auto");
+    onChange?.();
+  };
+  wEl.addEventListener("change", fire);
+  cEl.addEventListener("change", fire);
+  return card;
+}
+
+function buildStoryStepperCard({ step, onStep, stepCard }) {
+  const { card, body } = MBA.createCard({
+    tone: "support",
+    kicker: "Story flow",
+    title: "Problem → Evidence → Insight → Options → Next",
+    badge: { tone: "muted", text: "stepper" },
+  });
+
+  const steps = [
+    { id: "problem", label: "Problem" },
+    { id: "evidence", label: "Evidence" },
+    { id: "insight", label: "Insight" },
+    { id: "options", label: "Options" },
+    { id: "next", label: "Next" },
+  ];
+
+  const nav = document.createElement("div");
+  nav.className = "row row-actions";
+  nav.style.marginTop = "0";
+  for (const s of steps) {
+    const b = document.createElement("button");
+    b.className = `btn ${s.id === step ? "btn-primary" : ""}`;
+    b.textContent = s.label;
+    b.addEventListener("click", () => onStep(s.id));
+    nav.appendChild(b);
+  }
+  body.appendChild(nav);
+
+  const slot = document.createElement("div");
+  slot.style.marginTop = "10px";
+  slot.appendChild(stepCard);
+  body.appendChild(slot);
+  return card;
+}
+
 function buildCredibilityCard(status, meta) {
   const w = meta?.meta?.external?.weather_collector ?? null;
   const resolved = meta?.meta ?? {};
@@ -75,58 +177,6 @@ function buildCredibilityCard(status, meta) {
     );
   }
   body.innerHTML = lines.join("");
-  return card;
-}
-
-function buildStoryParagraphCard() {
-  const { card, body } = MBA.createCard({
-    tone: "meta",
-    kicker: "Story Structure",
-    title: "Problem → Evidence → Implication → Action",
-    badge: { tone: "muted", text: "guide" },
-  });
-  body.innerHTML = `
-    <div><span class="mono">Problem</span> · 哪些 MRT 站附近共享單車供需失衡？</div>
-    <div><span class="mono">Evidence</span> · 用 heat snapshot + 時間序列展示尖峰。</div>
-    <div><span class="mono">Implication</span> · 影響轉乘體驗與營運調度成本。</div>
-    <div><span class="mono">Action</span> · 選 Top N 問題站，提出 2–4 個策略選項。</div>
-  `;
-  return card;
-}
-
-function buildKpisCard(status) {
-  const h = status?.health ?? {};
-  const { card, body } = MBA.createCard({
-    tone: "support",
-    kicker: "Key Indicators",
-    title: "Operational KPIs",
-    badge: { tone: "ok", text: "live" },
-    actions: [
-      { type: "link", label: "Go to Ops", href: "/ops", primary: true },
-      { type: "link", label: "Open Explorer", href: "/explorer" },
-    ],
-  });
-  body.innerHTML = `
-    <div class="health-cards">
-      <div class="health-card">
-        <div class="health-title">Collector</div>
-        <div class="health-value">${h.collector_running ? "running" : "stopped"}</div>
-        <div class="health-meta mono">${h.collector_last_ok_utc || ""}</div>
-      </div>
-      <div class="health-card">
-        <div class="health-title">Bronze freshness</div>
-        <div class="health-value">${MBA.fmtAge(h.bronze_bike_availability_age_s)}</div>
-        <div class="health-meta mono">${h.bronze_bike_availability_last_utc || ""}</div>
-      </div>
-      <div class="health-card">
-        <div class="health-title">Silver freshness</div>
-        <div class="health-value">${MBA.fmtAge(
-          Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity))
-        )}</div>
-        <div class="health-meta mono">links/bike_timeseries</div>
-      </div>
-    </div>
-  `;
   return card;
 }
 
@@ -186,7 +236,7 @@ function buildStoryProblemCard({ status, meta, usage }) {
 function buildStoryRiskCard({ status, meta, risk }) {
   const w = meta?.meta?.external?.weather_collector ?? null;
   const rainingNow = Boolean(w?.is_rainy_now);
-  const items = Array.isArray(risk?.items) ? risk.items.slice(0, 5) : [];
+  const items = Array.isArray(risk?.items) ? risk.items.slice(0, 3) : [];
   const { card, body } = MBA.createCard({
     tone: "support",
     kicker: "Story Card · Actionable list",
@@ -233,6 +283,7 @@ function buildStoryRiskCard({ status, meta, risk }) {
     list.appendChild(li);
   }
   body.appendChild(list);
+  body.insertAdjacentHTML("beforeend", `<div class="hint" style="margin-top:10px;">Showing Top ${items.length}. See more in <a href="/insights">Insights</a>.</div>`);
   return card;
 }
 
@@ -738,215 +789,134 @@ async function main() {
   if (!root) return;
 
   const drafts = loadDrafts();
-  let snapshotMode = null; // BriefingSnapshotOut or null
+  const scenario = { weather: "auto", calendar: "auto" };
+  let step = "problem";
 
   const [status, meta] = await Promise.all([MBA.fetchJson("/status"), MBA.fetchJson("/meta")]);
-  MBA.setModePill(Boolean(status?.demo_mode));
-  MBA.setWeatherPill(meta);
+  MBA.setHeaderBadges(status, meta);
 
   const city = status?.tdx?.bike_cities?.[0] ?? "Taipei";
-  const [usage, risk, hotspotsAvail, hotspotsRent] = await Promise.all([
-    MBA.fetchJson(`/insights/weather_usage?city=${encodeURIComponent(city)}&hours=24`).catch(() => null),
-    MBA.fetchJson(`/insights/rain_risk_now?city=${encodeURIComponent(city)}&top_k=5`).catch(() => null),
-    MBA.fetchJson(`/insights/hotspots?metric=available&agg=sum&top_k=5`).catch(() => null),
-    MBA.fetchJson(`/insights/hotspots?metric=rent_proxy&agg=sum&top_k=5`).catch(() => null),
-  ]);
+  let usage = null;
+  let risk = null;
+  let hotspotsAvail = null;
+  let hotspotsRent = null;
 
-  const buildLiveSnapshotPayload = () => {
-    const h = status?.health ?? {};
-    const resolved = meta?.meta ?? {};
-    const kpis = [
-      { label: "Collector", value: h.collector_running ? "running" : "stopped", meta: h.collector_last_ok_utc || "", tone: h.collector_running ? "ok" : "warn" },
-      { label: "Bronze freshness", value: MBA.fmtAge(h.bronze_bike_availability_age_s), meta: h.bronze_bike_availability_last_utc || "", tone: "ok" },
-      {
-        label: "Silver freshness",
-        value: MBA.fmtAge(Math.min(Number(h.silver_metro_bike_links_age_s ?? Infinity), Number(h.silver_bike_timeseries_age_s ?? Infinity))),
-        meta: "links/bike_timeseries",
-        tone: "ok",
-      },
-    ];
-    if (Number(h.metro_tdx_404_count || 0)) {
-      kpis.push({ label: "Metro TDX 404", value: String(h.metro_tdx_404_count), meta: h.metro_tdx_404_last_utc || "", tone: "bad" });
-    }
+  const fetchStoryData = async () => {
+    const [u, r] = await Promise.all([
+      MBA.fetchJson(`/insights/weather_usage?city=${encodeURIComponent(city)}&hours=24`).catch(() => null),
+      MBA.fetchJson(`/insights/rain_risk_now?city=${encodeURIComponent(city)}&top_k=5`).catch(() => null),
+    ]);
+    usage = u;
+    risk = r;
+    const scenarioQs = `&scenario_weather=${encodeURIComponent(scenario.weather)}&scenario_calendar=${encodeURIComponent(scenario.calendar)}`;
+    const [ha, hr] = await Promise.all([
+      MBA.fetchJson(`/insights/hotspots?metric=available&agg=sum&top_k=5${scenarioQs}`).catch(() => null),
+      MBA.fetchJson(`/insights/hotspots?metric=rent_proxy&agg=sum&top_k=5${scenarioQs}`).catch(() => null),
+    ]);
+    hotspotsAvail = ha;
+    hotspotsRent = hr;
+  };
 
-    const policy = [];
-    const policyCards = buildPolicyOptionsSection({ status, meta, hotspotsAvail, hotspotsRent, rainRisk: risk, drafts });
-    // Extract from DOM-less generation: use the same intent as the generator above
-    if (!demo && Number(h.metro_tdx_404_count || 0) > 0) {
-      const d = drafts["metro_404"] || {};
-      policy.push({
-        kind: "metro_404",
-        title: "Fix data source: Metro stations unavailable (TDX 404)",
-        impact: "Restores station layer/links so insights remain trustworthy.",
-        beneficiaries: "Decision makers, operators, analysts",
-        risk: "Using fallback may differ from official station definitions.",
-        needs: "Provide external metro stations CSV or adjust TDX config/path.",
-        draft_owner: d.owner || "",
-        draft_due_date: d.due_date || "",
-        draft_notes: d.notes || "",
-        explorer_params: null,
-      });
-    }
-    if ((hotspotsAvail?.cold ?? []).length) {
-      const top = (hotspotsAvail.cold ?? [])[0];
-      const d = drafts["shortage"] || {};
-      policy.push({
-        kind: "shortage",
-        title: "Increase supply at shortage hotspots (low availability)",
-        impact: "Reduce 'no-bike' incidents and improve last-mile transfer reliability.",
-        beneficiaries: "Commuters, transfer passengers",
-        risk: "If shortage is only peak-hour, fixed expansion may be underutilized off-peak.",
-        needs: "1–2 weeks of data to verify peak patterns; confirm with operator logs.",
-        station_id: top?.station_id || null,
-        explorer_params: { station_id: top?.station_id || null, show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" },
-        draft_owner: d.owner || "",
-        draft_due_date: d.due_date || "",
-        draft_notes: d.notes || "",
-      });
-    }
-    if ((hotspotsRent?.hot ?? []).length) {
-      const top = (hotspotsRent.hot ?? [])[0];
-      const d = drafts["pressure"] || {};
-      policy.push({
-        kind: "pressure",
-        title: "Rebalancing strategy for high demand pressure (rent_proxy)",
-        impact: "Mitigates peak-hour demand spikes by targeted rebalancing and guidance.",
-        beneficiaries: "High-frequency users, operators",
-        risk: "Proxy demand may over/under-estimate true demand in certain areas.",
-        needs: "Validate proxy against ridership/operational data; define time-of-day strategy.",
-        station_id: top?.station_id || null,
-        explorer_params: { station_id: top?.station_id || null, show_bike_heat: 1, heat_metric: "rent_proxy", heat_agg: "sum" },
-        draft_owner: d.owner || "",
-        draft_due_date: d.due_date || "",
-        draft_notes: d.notes || "",
-      });
-    }
+  const learnedBullets = () => {
+    const out = [];
+    const cold = (hotspotsAvail?.cold ?? []).slice(0, 1);
+    const hot = (hotspotsRent?.hot ?? []).slice(0, 1);
+    if (cold.length) out.push(`Shortage risk: ${cold[0].name || cold[0].station_id} (available low).`);
+    if (hot.length) out.push(`Demand pressure: ${hot[0].name || hot[0].station_id} (rent_proxy high).`);
     const w = meta?.meta?.external?.weather_collector ?? null;
-    if (w?.is_rainy_now && (risk?.items ?? []).length) {
-      const top = (risk.items ?? [])[0];
-      const d = drafts["rain_contingency"] || {};
-      policy.push({
-        kind: "rain_contingency",
-        title: "Rain-day contingency: pre-position supply near risk stations",
-        impact: "Improves service resilience during rain; reduces sudden shortages.",
-        beneficiaries: "Commuters, vulnerable users during bad weather",
-        risk: "Weather is city-level estimate; microclimates may differ by district.",
-        needs: "Define rain threshold and lead time; consider communication/signage strategy.",
-        station_id: top?.station_id || null,
-        explorer_params: { station_id: top?.station_id || null, show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" },
-        draft_owner: d.owner || "",
-        draft_due_date: d.due_date || "",
-        draft_notes: d.notes || "",
+    if (w?.is_rainy_now) out.push("It is raining now: prioritize contingency placement and communication.");
+    return out.slice(0, 3);
+  };
+
+  const buildStepCard = () => {
+    if (step === "problem") {
+      const { card, body } = MBA.createCard({
+        tone: "support",
+        kicker: "Problem",
+        title: "Where does transfer experience break?",
+        badge: { tone: "muted", text: "frame" },
+        actions: [{ type: "link", label: "Open Insights", href: "/insights", primary: true }],
       });
+      body.innerHTML = `<div>Identify stations with <span class="mono">low availability</span> or <span class="mono">high rent_proxy</span>, then validate with time series in Explorer.</div>`;
+      return card;
     }
-
-    const one = oneSentence(status, meta);
-    const usageSummary =
-      usage && usage.precip_total_mm != null
-        ? `${usage.city || city} · ${Number(usage.precip_total_mm) > 0 ? `rain ${Number(usage.precip_total_mm).toFixed(1)}mm` : "no rain"} · rent_proxy ${Math.round(
-            Number(usage.rent_proxy_total ?? 0)
-          )} · return_proxy ${Math.round(Number(usage.return_proxy_total ?? 0))}`
-        : null;
-
-    return {
-      station_id: policy.find((p) => p.station_id)?.station_id || null,
-      story_step: "home",
-      kpis,
-      settings: { city },
-      artifacts: {
-        silver_build_id: resolved.silver_build_id || null,
-        inputs_hash: resolved.inputs_hash || null,
-        fallback_source: resolved.fallback_source || null,
-        one_sentence: one,
-        story_rain_usage: usageSummary,
-        story_rain_risk: risk?.items ?? null,
-        generated_at_utc: new Date().toISOString(),
-      },
-      policy_cards: policy.slice(0, 4),
-      notes: null,
-    };
+    if (step === "evidence") return buildStoryProblemCard({ status, meta, usage });
+    if (step === "insight") {
+      const { card, body } = MBA.createCard({
+        tone: "support",
+        kicker: "Insight",
+        title: "What we learned (2–3 bullets)",
+        badge: { tone: "muted", text: "summary" },
+        actions: [
+          { type: "link", label: "Open Explorer", href: MBA.explorerHref({ show_bike_heat: 1, heat_metric: "available", heat_agg: "sum" }), primary: true },
+        ],
+      });
+      const bullets = learnedBullets();
+      body.innerHTML = bullets.length
+        ? `<ul style="margin:0; padding-left:18px;">${bullets.map((x) => `<li>${x}</li>`).join("")}</ul>`
+        : `<div class="hint">Not enough data yet.</div>`;
+      return card;
+    }
+    if (step === "options") {
+      const { card, body } = MBA.createCard({
+        tone: "support",
+        kicker: "Options",
+        title: "Policy options (2–4)",
+        badge: { tone: "muted", text: "cards" },
+        actions: [{ type: "link", label: "Open Ops", href: "/ops", primary: true }],
+      });
+      body.innerHTML = `<div class="hint">Scroll below for the detailed policy cards.</div>`;
+      return card;
+    }
+    return buildNextActionsCard(status, meta);
   };
 
   const render = async () => {
     root.innerHTML = "";
-
-    const snapshotsCard = buildSnapshotsCard({
-      getLivePayload: () => buildLiveSnapshotPayload(),
-      onApplySnapshot: (snapOut) => {
-        snapshotMode = snapOut;
-        render().catch(() => {});
-      },
+    const primaryActionHref = MBA.explorerHref({
+      show_bike_heat: 1,
+      heat_metric: "available",
+      heat_agg: "sum",
+      guided: 1,
+      guided_kind: "evidence",
+      guided_title: "Start from brief",
     });
-    root.appendChild(snapshotsCard);
 
-    if (snapshotMode) {
-      const snap = snapshotMode.snapshot;
-      root.appendChild(
-        buildSnapshotBannerCard(snapshotMode, {
-          onBackToLive: () => {
-            snapshotMode = null;
-            render().catch(() => {});
-          },
-          onCopyFullBrief: async () => {
-            const live = snap;
-            const lines = [];
-            lines.push(`# MetroBikeAtlas Brief (snapshot)`);
-            lines.push(`- snapshot_id: ${snapshotMode.id}`);
-            lines.push(`- created_at_utc: ${snapshotMode.created_at_utc}`);
-            if (live?.artifacts?.silver_build_id) lines.push(`- silver_build_id: ${live.artifacts.silver_build_id}`);
-            if (live?.artifacts?.inputs_hash) lines.push(`- inputs_hash: ${live.artifacts.inputs_hash}`);
-            lines.push("");
-            lines.push(`## One sentence`);
-            lines.push(String(live.artifacts?.one_sentence || "—"));
-            lines.push("");
-            lines.push(`## KPIs`);
-            for (const k of live.kpis || []) lines.push(`- ${k.label}: ${k.value}${k.meta ? ` (${k.meta})` : ""}`);
-            lines.push("");
-            lines.push(`## Policy options`);
-            for (const c of live.policy_cards || []) {
-              lines.push(`### ${c.title || "Policy option"}`);
-              lines.push(`- Impact: ${c.impact || "—"}`);
-              lines.push(`- Beneficiaries: ${c.beneficiaries || "—"}`);
-              lines.push(`- Risk: ${c.risk || "—"}`);
-              lines.push(`- Needs: ${c.needs || "—"}`);
-              if (c.draft_owner || c.draft_due_date) lines.push(`- Owner/Due: ${c.draft_owner || "—"} / ${c.draft_due_date || "—"}`);
-              if (c.draft_notes) lines.push(`- Notes: ${c.draft_notes}`);
-              lines.push("");
-            }
-            if (live.notes) {
-              lines.push(`## Notes`);
-              lines.push(String(live.notes));
-              lines.push("");
-            }
-            await MBA.copyText(lines.join("\n"));
-            MBA.setStatusText("Copied full brief");
-          },
-        })
-      );
-      root.appendChild(buildSnapshotKpisCard(snap));
-      for (const c of buildSnapshotPolicyCards(snap)) root.appendChild(c);
-      const notesCard = buildSnapshotNotesCard(snap);
-      if (notesCard) root.appendChild(notesCard);
-      root.appendChild(buildMethodsCard());
-      MBA.setStatusText("Ready (snapshot)");
-      return;
-    }
+    root.appendChild(buildExecutiveBriefCard({ status, meta, scenario, learnedLines: learnedBullets(), primaryActionHref }));
+    root.appendChild(buildScenarioCard({ scenario, onChange: () => rerender().catch(() => {}) }));
+    root.appendChild(
+      buildStoryStepperCard({
+        step,
+        onStep: (id) => {
+          step = id;
+          render().catch(() => {});
+        },
+        stepCard: buildStepCard(),
+      })
+    );
 
-    root.appendChild(buildCredibilityCard(status, meta));
-    root.appendChild(buildKpisCard(status));
-    root.appendChild(buildTodayCard(status, meta));
-    root.appendChild(buildStoryParagraphCard());
-    root.appendChild(buildStoryProblemCard({ status, meta, usage }));
     root.appendChild(buildStoryRiskCard({ status, meta, risk }));
+
     for (const c of buildPolicyOptionsSection({ status, meta, hotspotsAvail, hotspotsRent, rainRisk: risk, drafts })) {
       root.appendChild(c);
     }
-    root.appendChild(buildNextActionsCard(status, meta));
+
     root.appendChild(buildMethodsCard());
+
+    const dataCard = buildCredibilityCard(status, meta);
+    dataCard.id = "data";
+    root.appendChild(dataCard);
+
     MBA.setStatusText("Ready");
   };
 
-  await render();
+  const rerender = async () => {
+    MBA.setStatusText("Updating…");
+    await fetchStoryData();
+    await render();
+  };
+
+  await rerender();
 
 }
 

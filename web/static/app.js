@@ -424,6 +424,8 @@ function renderStatusRows(container, rows) {
 }
 
 function setStatusPanel(payload) {
+  // Explorer is now “evidence only”; Ops/UI status panels may not be present.
+  if (!document.getElementById("statusUpdatedAt")) return;
   document.getElementById("statusUpdatedAt").textContent = payload?.now_utc
     ? `updated ${fmtTs(payload.now_utc)}`
     : "";
@@ -867,34 +869,44 @@ function buildPermalinkState(state) {
   };
 }
 
-function setModePill(cfg) {
-  const pill = document.getElementById("modePill");
-  pill.textContent = cfg.demo_mode ? "Demo mode" : "Real data mode";
-}
+function setHeaderBadges(statusPayload, metaPayload) {
+  const modeEl = document.getElementById("hdrMode");
+  const ageEl = document.getElementById("hdrAge");
+  const buildEl = document.getElementById("hdrBuild");
+  if (!modeEl && !ageEl && !buildEl) return;
 
-function setWeatherPill(metaPayload) {
-  const el = document.getElementById("weatherPill");
-  if (!el) return;
-  el.classList.remove("ok", "warn", "bad");
-
-  const summary = metaPayload?.meta?.external?.weather_collector ?? null;
-  if (!summary || typeof summary !== "object") {
-    el.classList.add("warn");
-    el.textContent = "Weather: unavailable";
-    el.title = "Weather collector heartbeat not found.";
-    return;
+  const demo = Boolean(statusPayload?.demo_mode);
+  if (modeEl) {
+    modeEl.textContent = demo ? "demo" : "real";
+    modeEl.classList.remove("ok", "warn", "bad", "muted");
+    modeEl.classList.add(demo ? "warn" : "ok");
   }
 
-  const stale = Boolean(summary.stale);
-  const rainy = Boolean(summary.is_rainy_now);
-  const age = summary.heartbeat_age_s;
-  const precip = summary.latest_observed_precip_mm;
+  const h = statusPayload?.health ?? {};
+  const bronzeAge = Number(h.bronze_bike_availability_age_s);
+  const silverAge = Math.min(
+    Number(h.silver_metro_bike_links_age_s ?? Infinity),
+    Number(h.silver_bike_timeseries_age_s ?? Infinity)
+  );
+  const candidates = [bronzeAge, silverAge].filter((x) => Number.isFinite(Number(x)));
+  const effectiveAge = candidates.length ? Math.max(...candidates) : null;
+  if (ageEl) {
+    ageEl.textContent = effectiveAge == null ? "age —" : `age ${formatAge(effectiveAge)}`;
+    ageEl.classList.remove("ok", "warn", "bad", "muted");
+    if (effectiveAge == null) ageEl.classList.add("warn");
+    else if (effectiveAge > 3600) ageEl.classList.add("bad");
+    else if (effectiveAge > 900) ageEl.classList.add("warn");
+    else ageEl.classList.add("ok");
+  }
 
-  el.classList.add(stale ? "bad" : "ok");
-  const ageTxt = age == null ? "—" : formatAge(age);
-  const rainTxt = rainy ? ` · rain${precip != null ? ` ${Number(precip).toFixed(1)}mm` : ""}` : "";
-  el.textContent = `Weather: ${stale ? "stale" : "ok"} · ${ageTxt}${rainTxt}`;
-  el.title = (summary.commands ?? []).join("\n") || "";
+  const resolved = metaPayload?.meta ?? {};
+  const buildId = resolved.silver_build_id || metaPayload?.silver_build_meta?.build_id || null;
+  if (buildEl) {
+    buildEl.textContent = `build ${String(buildId || "—").slice(0, 8)}`;
+    buildEl.classList.remove("ok", "warn", "bad", "muted");
+    buildEl.classList.add(buildId ? "muted" : "warn");
+    buildEl.title = buildId ? String(buildId) : "Build id unavailable";
+  }
 }
 
 function updateHud({ station, settings }) {
@@ -1866,13 +1878,12 @@ export async function runExplorer() {
   }
 
   const cfg = await fetchJson("/config");
-  setModePill(cfg);
   document.getElementById("appTitle").textContent = cfg.app_name;
 
   const storedSettings = loadStoredJson("metrobikeatlas.settings.v1");
   const settings = mergeSettings(defaultSettingsFromConfig(cfg), storedSettings);
 
-	  const state = {
+  const state = {
 	    cfg,
 	    settings,
 	    stations: [],
@@ -1891,8 +1902,10 @@ export async function runExplorer() {
     heatByStation: new Map(),
 	    lastHotspots: null,
 	    weatherUsage: null,
-	    rainRisk: null,
-	    weatherSummary: null,
+    rainRisk: null,
+    weatherSummary: null,
+    _headerStatus: null,
+    _headerMeta: null,
 	    // Used to keep labels informative even when heat layer is hidden.
 	    labelMetaTs: null,
 	    labelByStation: new Map(),
@@ -2461,6 +2474,8 @@ export async function runExplorer() {
       if (!quiet) setStatusText("Loading status…");
       const payload = await fetchJson("/status");
       state.lastStatusSnapshot = payload;
+      state._headerStatus = payload;
+      setHeaderBadges(state._headerStatus, state._headerMeta);
       setStatusPanel(payload);
       if (state.settings.app_view === "home") renderBriefing(payload, state, { onboarding });
       refreshMeta({ quiet: true }).catch(() => {});
@@ -2499,9 +2514,10 @@ export async function runExplorer() {
     try {
       const m = await fetchJson("/meta");
       state.globalMeta = m;
+      state._headerMeta = m;
+      setHeaderBadges(state._headerStatus, state._headerMeta);
       state.silverBuildMeta = m?.silver_build_meta ?? state.silverBuildMeta ?? null;
       state.weatherSummary = m?.meta?.external?.weather_collector ?? null;
-      setWeatherPill(m);
       applyRainMode({ source: "meta" }).catch(() => {});
       if (!quiet) setStatusText("Meta updated");
     } catch {
@@ -2992,18 +3008,7 @@ export async function runExplorer() {
     state.statusTimer = setInterval(() => refreshStatus({ quiet: true }), next);
   }
 
-  function setSsePill(status, detail) {
-    const el = document.getElementById("ssePill");
-    if (!el) return;
-    el.classList.remove("ok", "warn", "bad");
-    if (status === "connected") el.classList.add("ok");
-    else if (status === "reconnecting") el.classList.add("warn");
-    else if (status === "disconnected") el.classList.add("bad");
-    const suffix = detail ? ` · ${detail}` : "";
-    el.textContent = `Live: ${status}${suffix}`;
-  }
-
-  document.getElementById("btnRefreshStatus").addEventListener("click", () => refreshStatus({ quiet: false }));
+  document.getElementById("btnRefreshStatus")?.addEventListener("click", () => refreshStatus({ quiet: false }));
   // Insights tab controls
   document.getElementById("btnRefreshInsights")?.addEventListener("click", () => refreshInsightsLists({ quiet: false }));
   document.getElementById("btnInsightsToExplorer")?.addEventListener("click", () =>
@@ -3032,18 +3037,18 @@ export async function runExplorer() {
   // Admin token controls (optional, for remote admin usage).
   const tokenInput = document.getElementById("adminTokenInput");
   if (tokenInput) tokenInput.value = getAdminToken();
-  document.getElementById("btnSaveAdminToken").addEventListener("click", () => {
+  document.getElementById("btnSaveAdminToken")?.addEventListener("click", () => {
     const v = String(document.getElementById("adminTokenInput")?.value || "").trim();
     setAdminToken(v);
     setStatusText(v ? "Admin token saved" : "Admin token cleared");
   });
-  document.getElementById("btnClearAdminToken").addEventListener("click", () => {
+  document.getElementById("btnClearAdminToken")?.addEventListener("click", () => {
     setAdminToken("");
     const el = document.getElementById("adminTokenInput");
     if (el) el.value = "";
     setStatusText("Admin token cleared");
   });
-  document.getElementById("btnStartCollector").addEventListener("click", () =>
+  document.getElementById("btnStartCollector")?.addEventListener("click", () =>
     withConfirm("Start background collector now?", async () => {
       setAdminBusy(true);
       setOverlayVisible(true, "Starting collector…");
@@ -3063,7 +3068,7 @@ export async function runExplorer() {
       }
     })
   );
-  document.getElementById("btnStopCollector").addEventListener("click", () =>
+  document.getElementById("btnStopCollector")?.addEventListener("click", () =>
     withConfirm("Stop background collector now?", async () => {
       setAdminBusy(true);
       setOverlayVisible(true, "Stopping collector…");
@@ -3083,7 +3088,7 @@ export async function runExplorer() {
       }
     })
   );
-  document.getElementById("btnBuildSilver").addEventListener("click", async () => {
+  document.getElementById("btnBuildSilver")?.addEventListener("click", async () => {
     setAdminBusy(true);
     setOverlayVisible(true, "Preparing Silver build…");
     try {
@@ -3116,7 +3121,7 @@ export async function runExplorer() {
     }
   });
 
-  document.getElementById("btnRefreshWeather").addEventListener("click", () =>
+  document.getElementById("btnRefreshWeather")?.addEventListener("click", () =>
     withConfirm("Request an immediate weather refresh now?", async () => {
       setAdminBusy(true);
       setOverlayVisible(true, "Refreshing weather…");
@@ -3141,22 +3146,19 @@ export async function runExplorer() {
     if (!window.EventSource) return;
     const es = new EventSource("/events?interval_s=3");
     state.sse = { connected: false, lastEventAtMs: null, lastErrorAtMs: null };
-
-    setSsePill("reconnecting");
     // When SSE is unavailable, keep polling more frequently.
     setStatusPolling(10000);
 
     es.onopen = () => {
       state.sse.connected = true;
       state.sse.lastEventAtMs = Date.now();
-      setSsePill("connected");
       // When SSE is healthy, poll less frequently as a safety net.
       setStatusPolling(60000);
     };
     es.onerror = () => {
       state.sse.connected = false;
       state.sse.lastErrorAtMs = Date.now();
-      setSsePill("reconnecting");
+      pushAction({ level: "warn", title: "Live events", message: "Connection lost. Falling back to polling." });
       // When SSE is unhealthy (proxy issues, server restarts), poll more often.
       setStatusPolling(10000);
     };
@@ -3170,6 +3172,8 @@ export async function runExplorer() {
         if (msg?.status) {
           markEvent();
           state.lastStatusSnapshot = msg.status;
+          state._headerStatus = msg.status;
+          setHeaderBadges(state._headerStatus, state._headerMeta);
           setStatusPanel(msg.status);
           if (state.settings.app_view === "home") renderBriefing(msg.status, state, { onboarding });
         }
@@ -3271,7 +3275,8 @@ export async function runExplorer() {
     es.addEventListener("sse_error", (ev) => {
       try {
         const msg = JSON.parse(ev.data || "{}");
-        setSsePill(state?.sse?.connected ? "connected" : "reconnecting", msg?.detail || "server error");
+        const detail = msg?.detail ? String(msg.detail) : "server error";
+        pushAction({ level: "warn", title: "Live events", message: detail });
       } catch {}
     });
   }

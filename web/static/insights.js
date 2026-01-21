@@ -6,39 +6,13 @@ const MBA = { ...Core, createCard };
 function storyParagraphCard() {
   const { card, body } = MBA.createCard({
     tone: "meta",
-    kicker: "Story Structure",
-    title: "Problem → Evidence → Implication → Action",
+    kicker: "How to read",
+    title: "List → Why → Open Explorer",
     badge: { tone: "muted", text: "guide" },
   });
   body.innerHTML = `
-    <div><span class="mono">Problem</span> · 哪些站點缺車/滿柱風險最高？</div>
-    <div><span class="mono">Evidence</span> · 用排序清單（Top K）當作證據附件。</div>
-    <div><span class="mono">Implication</span> · 影響轉乘與調度，需定義介入策略。</div>
-    <div><span class="mono">Action</span> · 一鍵開 Explorer，帶入 heat 參數與站點。</div>
+    <div>Pick a mode, read the 1‑sentence reason, then open a station in Explorer to validate with time series.</div>
   `;
-  return card;
-}
-
-function credibilityCard(status, meta) {
-  const resolved = meta?.meta ?? {};
-  const { card, body } = MBA.createCard({
-    tone: "meta",
-    kicker: "Data Credibility",
-    title: "Sources · freshness · traceability",
-    badge: { tone: status?.demo_mode ? "warn" : "ok", text: status?.demo_mode ? "demo" : "real" },
-    right: `<span class="mono">build ${MBA.shortId(resolved.silver_build_id)}</span>`,
-    actions: [
-      { type: "link", label: "Open Ops", href: "/ops", primary: true },
-      {
-        label: "Download JSON",
-        onClick: () => MBA.downloadJson(`metrobikeatlas-insights-meta-${new Date().toISOString()}.json`, { status, meta }),
-      },
-    ],
-  });
-  body.innerHTML = `<div class="hint">Silver: <span class="mono">${MBA.shortId(resolved.silver_build_id)}</span> · hash <span class="mono">${MBA.shortId(
-    resolved.inputs_hash,
-    10
-  )}</span> · source <span class="mono">${resolved.fallback_source || "—"}</span></div>`;
   return card;
 }
 
@@ -225,13 +199,11 @@ async function main() {
   };
 
   const [status, meta] = await Promise.all([MBA.fetchJson("/status"), MBA.fetchJson("/meta")]);
-  MBA.setModePill(Boolean(status?.demo_mode));
-  MBA.setWeatherPill(meta);
+  MBA.setHeaderBadges(status, meta);
 
   const refresh = async () => {
     MBA.setStatusText("Loading list…");
     root.innerHTML = "";
-    root.appendChild(credibilityCard(status, meta));
     root.appendChild(storyParagraphCard());
     root.appendChild(
       controlsCard({

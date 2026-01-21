@@ -62,6 +62,50 @@ export function setWeatherPill(metaPayload) {
   el.classList.add(w.stale ? "warn" : "ok");
 }
 
+export function setHeaderBadges(statusPayload, metaPayload) {
+  const modeEl = document.getElementById("hdrMode");
+  const ageEl = document.getElementById("hdrAge");
+  const buildEl = document.getElementById("hdrBuild");
+  if (!modeEl && !ageEl && !buildEl) return;
+
+  const demo = Boolean(statusPayload?.demo_mode);
+  if (modeEl) {
+    modeEl.textContent = demo ? "demo" : "real";
+    modeEl.classList.remove("ok", "warn", "bad", "muted");
+    modeEl.classList.add(demo ? "warn" : "ok");
+  }
+
+  const h = statusPayload?.health ?? {};
+  const bronzeAge = Number(h.bronze_bike_availability_age_s);
+  const silverAge = Math.min(
+    Number(h.silver_metro_bike_links_age_s ?? Infinity),
+    Number(h.silver_bike_timeseries_age_s ?? Infinity)
+  );
+  const candidates = [bronzeAge, silverAge].filter((x) => Number.isFinite(Number(x)));
+  const effectiveAge = candidates.length ? Math.max(...candidates) : null;
+  if (ageEl) {
+    const ageTxt = effectiveAge == null ? "age —" : `age ${fmtAge(effectiveAge)}`;
+    ageEl.textContent = ageTxt;
+    ageEl.classList.remove("ok", "warn", "bad", "muted");
+    if (effectiveAge == null) ageEl.classList.add("warn");
+    else if (effectiveAge > 3600) ageEl.classList.add("bad");
+    else if (effectiveAge > 900) ageEl.classList.add("warn");
+    else ageEl.classList.add("ok");
+    ageEl.title =
+      `bronze=${fmtAge(bronzeAge)} silver=${fmtAge(silverAge)}`.replaceAll("—", "?") +
+      (statusPayload?.now_utc ? ` · now=${statusPayload.now_utc}` : "");
+  }
+
+  const resolved = metaPayload?.meta ?? {};
+  const buildId = resolved.silver_build_id || metaPayload?.silver_build_meta?.build_id || null;
+  if (buildEl) {
+    buildEl.textContent = `build ${shortId(buildId)}`;
+    buildEl.classList.remove("ok", "warn", "bad", "muted");
+    buildEl.classList.add(buildId ? "muted" : "warn");
+    buildEl.title = buildId ? String(buildId) : "Build id unavailable";
+  }
+}
+
 export function explorerHref(params) {
   const items = [];
   for (const [k, v] of Object.entries(params || {})) {
@@ -125,4 +169,3 @@ export async function adminPostJson(url, body) {
   if (!res.ok) throw new Error(decodeAdminError(payload, res.status));
   return payload;
 }
-
