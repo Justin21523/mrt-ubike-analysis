@@ -982,8 +982,14 @@ function initSplitters(state) {
   const panels = loadStoredJson("metrobikeatlas.panels.v1") || {};
   const leftSize = panels.left_size ?? null;
   const rightSize = panels.right_size ?? null;
-  if (typeof leftSize === "number") root.style.setProperty("--left-size", `${leftSize}px`);
-  if (typeof rightSize === "number") root.style.setProperty("--right-size", `${rightSize}px`);
+  // Clamp persisted sizes to avoid a broken layout if localStorage got corrupted
+  // or a previous version stored out-of-range values.
+  if (typeof leftSize === "number" && Number.isFinite(leftSize)) {
+    root.style.setProperty("--left-size", `${clamp(leftSize, 220, 600)}px`);
+  }
+  if (typeof rightSize === "number" && Number.isFinite(rightSize)) {
+    root.style.setProperty("--right-size", `${clamp(rightSize, 260, 700)}px`);
+  }
 
   function onDragSplitter(splitterId, side) {
     const splitter = document.getElementById(splitterId);
@@ -1840,6 +1846,25 @@ function renderBriefing(status, state, { onboarding } = {}) {
 }
 
 export async function runExplorer() {
+  // Guard against accidental inclusion on non-Explorer pages (or stale cached HTML).
+  const requiredIds = [
+    "workspace",
+    "map",
+    "appTitle",
+    "stationSelect",
+    "stationSearch",
+    "leftPanel",
+    "rightPanel",
+    "splitterLeft",
+    "splitterRight",
+  ];
+  const missing = requiredIds.filter((id) => !document.getElementById(id));
+  if (missing.length) {
+    const msg = `Explorer UI is missing required elements: ${missing.join(", ")}. Please hard-refresh.`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
   const cfg = await fetchJson("/config");
   setModePill(cfg);
   document.getElementById("appTitle").textContent = cfg.app_name;
@@ -3556,6 +3581,21 @@ export async function runExplorer() {
 
   document.getElementById("btnResetView").addEventListener("click", () => {
     map.setView([cfg.web_map.center_lat, cfg.web_map.center_lon], cfg.web_map.zoom);
+  });
+
+  document.getElementById("btnResetLayout").addEventListener("click", () => {
+    try {
+      localStorage.removeItem("metrobikeatlas.panels.v1");
+    } catch {
+      // ignore
+    }
+    document.documentElement.style.removeProperty("--left-size");
+    document.documentElement.style.removeProperty("--right-size");
+    document.body.classList.remove("left-collapsed", "right-collapsed");
+    state.settings.left_collapsed = false;
+    state.settings.right_collapsed = false;
+    persistSettings();
+    location.reload();
   });
 
   document.getElementById("btnToggleLeft").addEventListener("click", () => {
